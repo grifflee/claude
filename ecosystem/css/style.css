@@ -402,6 +402,15 @@ html, body {
   transform: scale(0.98);
 }
 
+.action-btn.active {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+  border-color: var(--border-accent);
+  box-shadow:
+    0 0 8px rgba(0, 212, 255, 0.12),
+    inset 0 1px 0 rgba(0, 212, 255, 0.08);
+}
+
 .action-btn.danger {
   color: var(--text-secondary);
 }
@@ -411,6 +420,176 @@ html, body {
   background: var(--red-dim);
   border-color: rgba(255, 71, 87, 0.25);
   box-shadow: 0 0 12px rgba(255, 71, 87, 0.08);
+}
+
+/* ---------- Universe Panel ---------- */
+.universe-current {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 6px var(--gap-sm);
+  background: var(--bg-section);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--gap-sm);
+}
+
+.universe-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.universe-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cyan);
+  flex: 1;
+}
+
+.universe-autosave {
+  font-size: 9px;
+  color: var(--green);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.universe-autosave.visible {
+  opacity: 1;
+}
+
+.universe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 140px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+.universe-slot {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 5px var(--gap-sm);
+  background: var(--bg-section);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.universe-slot:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+
+.universe-slot.active {
+  border-color: var(--border-accent);
+  background: var(--cyan-dim);
+}
+
+.universe-slot-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.universe-slot-info {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.universe-slot-delete {
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+
+.universe-slot:hover .universe-slot-delete {
+  opacity: 1;
+}
+
+.universe-slot-delete:hover {
+  color: var(--red);
+}
+
+/* ---------- Settings Panel ---------- */
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  overflow: hidden;
+  max-height: 500px;
+  transition: max-height var(--transition-slow), opacity var(--transition-slow);
+  opacity: 1;
+}
+
+.settings-content.collapsed {
+  max-height: 0;
+  opacity: 0;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.setting-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.setting-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--bg-section);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.setting-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(0, 212, 255, 0.3);
+}
+
+.setting-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 6px rgba(0, 212, 255, 0.3);
+}
+
+.setting-value {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 42px;
+  text-align: right;
 }
 
 /* ---------- Creature Inspector ---------- */
@@ -458,6 +637,23 @@ html, body {
 
 .inspector-panel.visible .placeholder-text {
   display: none;
+}
+
+/* ---------- Minimap ---------- */
+#minimap {
+  position: absolute;
+  top: var(--gap-lg);
+  left: var(--gap-lg);
+  width: 160px;
+  height: 90px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: rgba(10, 14, 23, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
 /* ---------- Info Overlay (Bottom-Left) ---------- */

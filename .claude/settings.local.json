@@ -3,7 +3,8 @@
     "allow": [
       "Bash(ls:*)",
       "Bash(wc:*)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "Bash(curl:*)"
     ]
   }
 }

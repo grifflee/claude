@@ -192,7 +192,9 @@
     this.angle += outputs[0] * this.bodyGenes.turnSpeed;
 
     //    output[1]: speed — map from [-1, 1] to [0, maxSpeed]
-    this.speed = ((outputs[1] + 1) / 2) * this.bodyGenes.maxSpeed;
+    //    Low aggression (<0.3) creatures get up to 15% speed bonus (prey adaptation)
+    var speedBonus = this.bodyGenes.aggression < 0.3 ? 1 + (0.3 - this.bodyGenes.aggression) * 0.5 : 1;
+    this.speed = ((outputs[1] + 1) / 2) * this.bodyGenes.maxSpeed * speedBonus;
 
     //    output[2]: eat/attack desire
     this.wantsToEat = outputs[2] > 0;

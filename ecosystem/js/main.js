@@ -60,6 +60,11 @@
                     for (var i = 0; i < ticksThisFrame; i++) {
                         world.update();
                     }
+                    // Auto-save check
+                    if (EcoSim.Serialization && EcoSim.Serialization.checkAutoSave(world)) {
+                        ui.refreshUniversePanel();
+                        ui.showAutoSaveIndicator();
+                    }
                 }
 
                 // Always render (even when paused)

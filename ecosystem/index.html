@@ -114,6 +114,60 @@
         </div>
       </section>
 
+      <!-- Universes -->
+      <section class="panel universe-panel">
+        <h2 class="panel-title">Universes</h2>
+        <div class="universe-current">
+          <span class="universe-label">Active:</span>
+          <span class="universe-name" id="universe-name">Unsaved</span>
+          <span class="universe-autosave" id="autosave-indicator"></span>
+        </div>
+        <div id="universe-list" class="universe-list"></div>
+        <div class="button-row" style="margin-top:8px">
+          <button class="action-btn" id="universe-save-btn">Save</button>
+          <button class="action-btn" id="universe-new-btn">New</button>
+        </div>
+        <div class="button-row" style="margin-top:4px">
+          <button class="action-btn" id="download-btn">Export</button>
+          <button class="action-btn" id="upload-btn">Import</button>
+          <input type="file" id="upload-input" accept=".json" style="display:none">
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section class="panel settings-panel" id="settings-panel">
+        <h2 class="panel-title settings-toggle" id="settings-toggle" style="cursor:pointer">
+          Settings <span id="settings-arrow" style="font-size:8px;margin-left:4px">&#9660;</span>
+        </h2>
+        <div id="settings-content" class="settings-content collapsed">
+          <div class="setting-row">
+            <label class="setting-label">Mutation Rate</label>
+            <input type="range" class="setting-slider" id="slider-mutation-rate" min="0" max="50" value="15" step="1">
+            <span class="setting-value" id="val-mutation-rate">15%</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Mutation Strength</label>
+            <input type="range" class="setting-slider" id="slider-mutation-strength" min="5" max="80" value="25" step="1">
+            <span class="setting-value" id="val-mutation-strength">0.25</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Food Spawn Rate</label>
+            <input type="range" class="setting-slider" id="slider-food-spawn" min="10" max="200" value="60" step="5">
+            <span class="setting-value" id="val-food-spawn">0.60</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Energy Drain</label>
+            <input type="range" class="setting-slider" id="slider-energy-drain" min="2" max="20" value="8" step="1">
+            <span class="setting-value" id="val-energy-drain">0.08</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Day Cycle Length</label>
+            <input type="range" class="setting-slider" id="slider-day-cycle" min="500" max="10000" value="3000" step="100">
+            <span class="setting-value" id="val-day-cycle">3000</span>
+          </div>
+        </div>
+      </section>
+
       <!-- Selected Creature Inspector -->
       <section class="panel inspector-panel" id="creature-inspector">
         <h2 class="panel-title">Selected Creature</h2>
@@ -124,6 +178,9 @@
         <div id="creature-details"></div>
       </section>
     </aside>
+
+    <!-- Minimap -->
+    <canvas id="minimap" width="160" height="90"></canvas>
 
     <!-- Bottom-left info overlay -->
     <div id="info-overlay">
@@ -141,6 +198,7 @@
   <script src="js/neural.js"></script>
   <script src="js/creature.js"></script>
   <script src="js/world.js"></script>
+  <script src="js/serialization.js"></script>
   <script src="js/renderer.js"></script>
   <script src="js/stats.js"></script>
   <script src="js/ui.js"></script>

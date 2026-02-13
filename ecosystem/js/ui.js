@@ -29,7 +29,18 @@
     this.speedBtns = document.querySelectorAll('.speed-btn');
     this.toggleBtns = document.querySelectorAll('.toggle-btn');
 
+    this.downloadBtn = document.getElementById('download-btn');
+    this.uploadBtn = document.getElementById('upload-btn');
+    this.uploadInput = document.getElementById('upload-input');
+    this.universeSaveBtn = document.getElementById('universe-save-btn');
+    this.universeNewBtn = document.getElementById('universe-new-btn');
+    this.universeNameEl = document.getElementById('universe-name');
+    this.universeListEl = document.getElementById('universe-list');
+    this.autosaveIndicator = document.getElementById('autosave-indicator');
+
     this.bindEvents();
+    this.initSettings();
+    this.initUniversePanel();
   }
 
   UI.prototype.bindEvents = function () {
@@ -99,6 +110,37 @@
         world.reset();
         self.stats.reset();
         self._resetUIState();
+      });
+    }
+
+    // 5b. Export/Import buttons
+    if (this.downloadBtn) {
+      this.downloadBtn.addEventListener('click', function () {
+        if (EcoSim.Serialization) {
+          EcoSim.Serialization.downloadSave(world);
+        }
+      });
+    }
+
+    if (this.uploadBtn && this.uploadInput) {
+      this.uploadBtn.addEventListener('click', function () {
+        self.uploadInput.click();
+      });
+      this.uploadInput.addEventListener('change', function (e) {
+        var file = e.target.files[0];
+        if (!file || !EcoSim.Serialization) return;
+        EcoSim.Serialization.loadFromFile(world, file, function (err, name) {
+          if (err) {
+            self.uploadBtn.textContent = 'Error';
+          } else {
+            self.stats.reset();
+            self._resetUIState();
+            self.refreshUniversePanel();
+            self.uploadBtn.textContent = 'Imported!';
+          }
+          setTimeout(function () { self.uploadBtn.textContent = 'Import'; }, 1500);
+        });
+        self.uploadInput.value = '';
       });
     }
 
@@ -313,6 +355,181 @@
     if (this._frameCount % 10 === 0) {
       this.updateCreatureInspector();
     }
+  };
+
+  UI.prototype.initUniversePanel = function () {
+    var self = this;
+    var world = this.world;
+    var Ser = EcoSim.Serialization;
+    if (!Ser) return;
+
+    // Save button — save current universe (or create new one)
+    if (this.universeSaveBtn) {
+      this.universeSaveBtn.addEventListener('click', function () {
+        if (!Ser.currentUniverse) {
+          // No active universe — create one
+          var name = Ser.generateName();
+          Ser.saveUniverse(world, name);
+        } else {
+          Ser.saveUniverse(world, Ser.currentUniverse);
+        }
+        self.refreshUniversePanel();
+        self._flashButton(self.universeSaveBtn, 'Saved!', 'Save');
+      });
+    }
+
+    // New button — save current to new universe
+    if (this.universeNewBtn) {
+      this.universeNewBtn.addEventListener('click', function () {
+        var name = Ser.generateName();
+        Ser.saveUniverse(world, name);
+        self.refreshUniversePanel();
+        self._flashButton(self.universeNewBtn, 'Created!', 'New');
+      });
+    }
+
+    this.refreshUniversePanel();
+  };
+
+  UI.prototype.refreshUniversePanel = function () {
+    var self = this;
+    var world = this.world;
+    var Ser = EcoSim.Serialization;
+    if (!Ser) return;
+
+    // Update current universe name
+    if (this.universeNameEl) {
+      this.universeNameEl.textContent = Ser.currentUniverse || 'Unsaved';
+    }
+
+    // Build universe list
+    if (!this.universeListEl) return;
+    var index = Ser.getUniverseIndex();
+    var html = '';
+
+    for (var i = 0; i < index.length; i++) {
+      var u = index[i];
+      var isActive = u.name === Ser.currentUniverse;
+      var ago = self._timeAgo(u.savedAt);
+      html += '<div class="universe-slot' + (isActive ? ' active' : '') + '" data-universe="' + self._escHtml(u.name) + '">';
+      html += '<span class="universe-slot-name">' + self._escHtml(u.name) + '</span>';
+      html += '<span class="universe-slot-info">Gen ' + u.generation + ' | ' + ago + '</span>';
+      html += '<span class="universe-slot-delete" data-delete="' + self._escHtml(u.name) + '">&times;</span>';
+      html += '</div>';
+    }
+
+    if (index.length === 0) {
+      html = '<div style="font-size:10px;color:rgba(255,255,255,0.3);text-align:center;padding:8px 0">No saved universes</div>';
+    }
+
+    this.universeListEl.innerHTML = html;
+
+    // Bind click handlers
+    var slots = this.universeListEl.querySelectorAll('.universe-slot');
+    for (var j = 0; j < slots.length; j++) {
+      (function (slot) {
+        slot.addEventListener('click', function (e) {
+          // Check if delete button was clicked
+          if (e.target.classList.contains('universe-slot-delete')) {
+            var delName = e.target.getAttribute('data-delete');
+            if (delName) {
+              Ser.deleteUniverse(delName);
+              self.refreshUniversePanel();
+            }
+            return;
+          }
+          // Load this universe
+          var name = slot.getAttribute('data-universe');
+          if (name && name !== Ser.currentUniverse) {
+            // Auto-save current universe before switching
+            if (Ser.currentUniverse) {
+              Ser.saveUniverse(world, Ser.currentUniverse);
+            }
+            Ser.loadUniverse(world, name);
+            self.stats.reset();
+            self._resetUIState();
+            self.refreshUniversePanel();
+          }
+        });
+      })(slots[j]);
+    }
+  };
+
+  UI.prototype.showAutoSaveIndicator = function () {
+    var indicator = this.autosaveIndicator;
+    if (!indicator) return;
+    indicator.textContent = 'auto-saved';
+    indicator.classList.add('visible');
+    clearTimeout(this._autosaveTimeout);
+    this._autosaveTimeout = setTimeout(function () {
+      indicator.classList.remove('visible');
+    }, 2000);
+  };
+
+  UI.prototype._flashButton = function (btn, flashText, normalText) {
+    if (!btn) return;
+    btn.textContent = flashText;
+    setTimeout(function () { btn.textContent = normalText; }, 1500);
+  };
+
+  UI.prototype._escHtml = function (str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  };
+
+  UI.prototype._timeAgo = function (timestamp) {
+    if (!timestamp) return '';
+    var diff = Date.now() - timestamp;
+    var secs = Math.floor(diff / 1000);
+    if (secs < 60) return 'just now';
+    var mins = Math.floor(secs / 60);
+    if (mins < 60) return mins + 'm ago';
+    var hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + 'h ago';
+    var days = Math.floor(hours / 24);
+    return days + 'd ago';
+  };
+
+  UI.prototype.initSettings = function () {
+    var toggle = document.getElementById('settings-toggle');
+    var content = document.getElementById('settings-content');
+    var arrow = document.getElementById('settings-arrow');
+
+    if (toggle && content) {
+      toggle.addEventListener('click', function () {
+        content.classList.toggle('collapsed');
+        arrow.textContent = content.classList.contains('collapsed') ? '\u25BC' : '\u25B2';
+      });
+    }
+
+    var sliders = [
+      { id: 'slider-mutation-rate', valId: 'val-mutation-rate', key: 'MUTATION_RATE',
+        toConfig: function (v) { return v / 100; },
+        toDisplay: function (v) { return v + '%'; } },
+      { id: 'slider-mutation-strength', valId: 'val-mutation-strength', key: 'MUTATION_STRENGTH',
+        toConfig: function (v) { return v / 100; },
+        toDisplay: function (v) { return (v / 100).toFixed(2); } },
+      { id: 'slider-food-spawn', valId: 'val-food-spawn', key: 'FOOD_SPAWN_RATE',
+        toConfig: function (v) { return v / 100; },
+        toDisplay: function (v) { return (v / 100).toFixed(2); } },
+      { id: 'slider-energy-drain', valId: 'val-energy-drain', key: 'CREATURE_ENERGY_DRAIN',
+        toConfig: function (v) { return v / 100; },
+        toDisplay: function (v) { return (v / 100).toFixed(2); } },
+      { id: 'slider-day-cycle', valId: 'val-day-cycle', key: 'DAY_CYCLE_LENGTH',
+        toConfig: function (v) { return parseInt(v, 10); },
+        toDisplay: function (v) { return v; } }
+    ];
+
+    sliders.forEach(function (s) {
+      var slider = document.getElementById(s.id);
+      var valEl = document.getElementById(s.valId);
+      if (!slider || !valEl) return;
+
+      slider.addEventListener('input', function () {
+        var raw = parseFloat(slider.value);
+        Config[s.key] = s.toConfig(raw);
+        valEl.textContent = s.toDisplay(raw);
+      });
+    });
   };
 
   EcoSim.UI = UI;

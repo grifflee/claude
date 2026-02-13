@@ -33,7 +33,7 @@ EcoSim.Config = {
   CREATURE_EAT_RANGE: 10,
 
   // ---- Neural Network ----
-  // Inputs (12):
+  // Inputs (16):
   //   0-1: nearest food dx, dy (normalized)
   //   2:   nearest food distance (normalized 0-1)
   //   3-4: nearest creature dx, dy (normalized)
@@ -42,7 +42,8 @@ EcoSim.Config = {
   //   7:   own energy level (normalized 0-1)
   //   8-9: wall proximity left/right (0-1, 1=touching)
   //   10-11: wall proximity up/down (0-1, 1=touching)
-  NN_INPUT_SIZE: 12,
+  //   12-15: previous tick's outputs (recurrent memory)
+  NN_INPUT_SIZE: 16,
   NN_HIDDEN1_SIZE: 10,
   NN_HIDDEN2_SIZE: 8,
   // Outputs (4):
@@ -70,6 +71,14 @@ EcoSim.Config = {
   GRID_COLOR: 'rgba(255,255,255,0.03)',
   TRAIL_LENGTH: 8,
   PARTICLE_LIMIT: 200,
+
+  // ---- Day/Night Cycle ----
+  DAY_CYCLE_LENGTH: 3000,       // ticks per full day/night cycle
+  DAY_FOOD_MULTIPLIER: 0.5,    // food spawn varies by ±50% of base rate
+
+  // ---- Food Types ----
+  MEAT_ENERGY: 60,              // energy from meat (dropped by dead creatures)
+  MEAT_SPAWN_CHANCE: 0.7,       // chance dead creature drops meat
 
   // ---- Simulation ----
   TARGET_FPS: 60,

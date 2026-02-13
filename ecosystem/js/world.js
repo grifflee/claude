@@ -75,13 +75,15 @@
   // ===============================================================
   // Helper: create a food object
   // ===============================================================
-  function createFood(x, y) {
+  function createFood(x, y, type) {
+    var isMeat = type === 'meat';
     return {
       id: EcoSim.nextId(),
       x: x,
       y: y,
-      energy: FOOD_ENERGY,
-      size: FOOD_SIZE,
+      type: isMeat ? 'meat' : 'plant',
+      energy: isMeat ? Config.MEAT_ENERGY : FOOD_ENERGY,
+      size: isMeat ? FOOD_SIZE + 1.5 : FOOD_SIZE,
       age: 0,
       glow: 0.5 + Math.random() * 0.5
     };
@@ -95,6 +97,7 @@
     this.creatures = [];
     this.food = [];
     this.particles = [];
+    this.dyingCreatures = [];
 
     this.tick = 0;
     this.totalBirths = 0;
@@ -110,9 +113,31 @@
     this.selectedCreature = null;
     this.paused = false;
 
+    // Fertile zones — areas where food spawns faster
+    this.zones = [];
+    this._initZones();
+
     // Bind event listeners
     this._setupEventListeners();
   }
+
+  // ---------------------------------------------------------------
+  // _initZones() -- create 2-3 fertile zones at random positions
+  // ---------------------------------------------------------------
+  World.prototype._initZones = function () {
+    var count = 2 + Math.floor(Math.random() * 2); // 2-3 zones
+    this.zones = [];
+    for (var i = 0; i < count; i++) {
+      this.zones.push({
+        x: 100 + Math.random() * (this.width - 200),
+        y: 100 + Math.random() * (this.height - 200),
+        radius: 120 + Math.random() * 80,
+        spawnMultiplier: 2 + Math.random() * 2, // 2-4x food spawn boost
+        vx: (Math.random() - 0.5) * 0.02,       // very slow drift
+        vy: (Math.random() - 0.5) * 0.02
+      });
+    }
+  };
 
   // ---------------------------------------------------------------
   // Event listeners for particle effects and stat tracking
@@ -134,8 +159,19 @@
     });
 
     Events.on('creature:die', function (data) {
-      self.spawnParticle(data.creature.x, data.creature.y, 'die', '#ff3333');
+      var c = data.creature;
+      self.spawnParticle(c.x, c.y, 'die', '#ff3333');
       self.totalDeaths++;
+      // Drop meat at death location
+      if (Math.random() < Config.MEAT_SPAWN_CHANCE) {
+        self.food.push(createFood(c.x, c.y, 'meat'));
+      }
+      // Add to dying creatures for fade-out animation
+      self.dyingCreatures.push({
+        x: c.x, y: c.y, size: c.size, angle: c.angle,
+        hue: c.bodyGenes.hue, saturation: c.bodyGenes.saturation,
+        ticksLeft: 20
+      });
     });
   };
 
@@ -149,6 +185,7 @@
     this.creatures = [];
     this.food = [];
     this.particles = [];
+    this.dyingCreatures = [];
     this.spatialGrid = {};
     this.foodGrid = {};
 
@@ -158,6 +195,7 @@
     this.totalDeaths = 0;
     this.maxGeneration = 0;
     this.selectedCreature = null;
+    this._initZones();
 
     // Spawn initial creatures at random positions
     for (i = 0; i < INITIAL_CREATURE_COUNT; i++) {
@@ -265,6 +303,26 @@
       creatures.splice(0, excess);
     }
 
+    // Drift fertile zones slowly
+    for (i = 0; i < this.zones.length; i++) {
+      var z = this.zones[i];
+      z.x += z.vx;
+      z.y += z.vy;
+      // Bounce off edges
+      if (z.x < z.radius) { z.x = z.radius; z.vx = Math.abs(z.vx); }
+      if (z.x > this.width - z.radius) { z.x = this.width - z.radius; z.vx = -Math.abs(z.vx); }
+      if (z.y < z.radius) { z.y = z.radius; z.vy = Math.abs(z.vy); }
+      if (z.y > this.height - z.radius) { z.y = this.height - z.radius; z.vy = -Math.abs(z.vy); }
+    }
+
+    // Update dying creatures
+    for (i = this.dyingCreatures.length - 1; i >= 0; i--) {
+      this.dyingCreatures[i].ticksLeft--;
+      if (this.dyingCreatures[i].ticksLeft <= 0) {
+        this.dyingCreatures.splice(i, 1);
+      }
+    }
+
     // Update particles
     this._updateParticles();
 
@@ -313,7 +371,10 @@
   World.prototype._checkAttacking = function (creature) {
     if (!creature.wantsToEat) return;
 
-    var nearby = this.getNearbyCreatures(creature.x, creature.y, ATTACK_RANGE);
+    // High aggression creatures get larger attack range (+30% at max aggression)
+    var aggrBonus = creature.bodyGenes.aggression > 0.7 ? 1 + (creature.bodyGenes.aggression - 0.7) : 1;
+    var attackRange = ATTACK_RANGE * aggrBonus;
+    var nearby = this.getNearbyCreatures(creature.x, creature.y, attackRange);
     var closest = null;
     var closestDist = Infinity;
     var j, other, d;
@@ -510,8 +571,8 @@
       }
     }
 
-    // Build the 12-element input array
-    var inputs = new Array(12);
+    // Build the 16-element input array
+    var inputs = new Array(16);
 
     // Inputs 0-2: nearest food direction and distance
     if (nearestFood) {
@@ -570,17 +631,46 @@
     inputs[10] = Math.max(0, 1 - cy / WALL_SENSE_DIST);
     inputs[11] = Math.max(0, 1 - (this.height - cy) / WALL_SENSE_DIST);
 
+    // Inputs 12-15: previous tick's neural outputs (recurrent memory)
+    var prevOut = creature.brain.lastOutputs;
+    inputs[12] = prevOut[0];
+    inputs[13] = prevOut[1];
+    inputs[14] = prevOut[2];
+    inputs[15] = prevOut[3];
+
     return inputs;
   };
 
   // ---------------------------------------------------------------
   // spawnFood() -- probabilistic food spawning each tick
   // ---------------------------------------------------------------
+  World.prototype.getDayNightPhase = function () {
+    // Returns 0-1 where 0.5 = peak day, 0 and 1 = midnight
+    var cycle = Config.DAY_CYCLE_LENGTH;
+    return (Math.sin(this.tick / cycle * Math.PI * 2) + 1) * 0.5;
+  };
+
   World.prototype.spawnFood = function () {
     if (this.food.length >= FOOD_MAX_COUNT) return;
-    if (Math.random() >= FOOD_SPAWN_RATE) return;
+    // Modulate spawn rate by day/night cycle
+    var dayPhase = this.getDayNightPhase();
+    var spawnRate = Config.FOOD_SPAWN_RATE * (1 - Config.DAY_FOOD_MULTIPLIER + Config.DAY_FOOD_MULTIPLIER * 2 * dayPhase);
+    if (Math.random() >= spawnRate) return;
 
     var x, y;
+
+    // Zone-biased spawning: 40% chance to spawn inside a fertile zone
+    if (this.zones.length > 0 && Math.random() < 0.4) {
+      var zone = this.zones[Math.floor(Math.random() * this.zones.length)];
+      var zAngle = Math.random() * Math.PI * 2;
+      var zDist = Math.random() * zone.radius;
+      x = zone.x + Math.cos(zAngle) * zDist;
+      y = zone.y + Math.sin(zAngle) * zDist;
+      x = clamp(x, 20, this.width - 20);
+      y = clamp(y, 20, this.height - 20);
+      this.food.push(createFood(x, y));
+      return;
+    }
 
     // Cluster chance: spawn near existing food
     if (this.food.length > 0 && Math.random() < FOOD_CLUSTER_CHANCE) {

@@ -1,21 +1,18 @@
 # EcoSim — Enhancement Plan
 
-## Current State: v1 Complete
-The core simulation is functional: creatures with neural network brains evolve in a 2D world with food, predation, reproduction, and speciation. All UI controls, charts, and creature inspection work. ~3,800 lines across 10 files.
+## Current State: v2.2 (File-Based Saves)
+The core simulation is functional with all Phase 2-5 enhancements: day/night cycle, food types, death animation, predator/prey specialization, creature memory, terrain zones, minimap, settings panel, and multi-universe file-based save system with auto-save. ~5,200 lines across 12 files.
 
 ---
 
-## Phase 2: Polish & Bug Fixes (Priority: HIGH)
+## Phase 2: Polish & Bug Fixes (Priority: HIGH) -- COMPLETED
 
-### 2.1 Fix lastAction Reset
-**File**: `creature.js` line 260-263
-**Issue**: `lastAction` ('eating', 'attacking', 'reproducing') doesn't reset to 'idle'/'moving' quickly enough, causing flash effects to persist.
-**Fix**: At the START of `Creature.prototype.update()`, reset `this.lastAction = 'idle'` before processing brain outputs. The action will be set again if the creature actually eats/attacks/reproduces this tick.
+### 2.1 Fix lastAction Reset -- DONE
+**File**: `creature.js`
+**Fix applied**: Reset `this.lastAction = 'idle'` at the START of `update()`. Simplified the end-of-update check.
 
-### 2.2 Fix Action Button Active State for Add Food
-**File**: `ui.js`, `style.css`
-**Issue**: The "Add Food (click)" button uses `.active` class but the `.action-btn.active` style may not be defined.
-**Fix**: Add CSS rule for `.action-btn.active` with cyan highlight, similar to toggle buttons.
+### 2.2 Fix Action Button Active State for Add Food -- DONE
+**Fix applied**: Added `.action-btn.active` CSS rule with cyan highlight.
 
 ### 2.3 Improve Info Overlay
 **File**: `ui.js` around line 230
@@ -29,83 +26,47 @@ The core simulation is functional: creatures with neural network brains evolve i
 
 ---
 
-## Phase 3: Visual Enhancements (Priority: MEDIUM)
+## Phase 3: Visual Enhancements (Priority: MEDIUM) -- MOSTLY COMPLETED
 
-### 3.1 Ambient Background Particles
-**File**: `renderer.js`
-**Description**: Add slowly drifting, very faint particles in the background to give the world a living, atmospheric feel. Could be dust motes or energy wisps.
-**Implementation**:
-- Add array of 30-50 ambient particles in renderer constructor
-- Each: {x, y, vx, vy, alpha, size} — very slow movement, very low alpha (0.02-0.05)
-- Draw before food layer
-- Wrap around screen edges
+### 3.1 Ambient Background Particles -- DONE
+40 slowly drifting blue particles with 0.02-0.05 alpha, drawn before food, wrap around edges.
 
-### 3.2 Creature Size-Based Rendering Detail
-**File**: `renderer.js`
-**Description**: Larger creatures should look more detailed — maybe add more body segments or a mouth. Very small creatures can be simpler circles.
-**Implementation**: If `creature.size > 10`, draw an extra body segment. If `creature.size < 6`, skip eyes.
+### 3.2 Creature Size-Based Rendering Detail -- DONE
+Size>10: extra tail segment behind body. Size<6: skip eyes for simpler circle rendering.
 
-### 3.3 Food Spawn Animation
-**File**: `renderer.js`, `world.js`
-**Description**: When food spawns, have it fade in over a few frames rather than popping into existence.
-**Implementation**: Add a `spawnAge` property to food. In renderer, multiply alpha by `min(1, food.age / 10)`.
+### 3.3 Food Spawn Animation -- DONE
+Food fades in over first 10 ticks using `spawnFade = min(1, f.age / 10)` in renderer.
 
-### 3.4 Death Animation
-**File**: `renderer.js`
-**Description**: When a creature dies, briefly show its body fading out and shrinking before removing it.
-**Implementation**: Keep dead creatures in a separate `dyingCreatures` array for 20 ticks. Render them with decreasing alpha and size.
+### 3.4 Death Animation -- DONE
+`world.dyingCreatures` array holds {x,y,size,hue,sat,ticksLeft:20}. Renderer draws them fading/shrinking.
 
-### 3.5 Day/Night Cycle
-**File**: `renderer.js`, `world.js`, `config.js`
-**Description**: Gradual background color cycling between dark blue (night) and slightly lighter blue (day). Food spawns faster during "day."
-**Implementation**:
-- Add `DAY_CYCLE_LENGTH: 3000` to config (ticks per full cycle)
-- World modulates `FOOD_SPAWN_RATE` by `0.5 + 0.5 * sin(tick / DAY_CYCLE_LENGTH * TAU)`
-- Renderer modulates background brightness similarly
+### 3.5 Day/Night Cycle -- DONE
+Config: `DAY_CYCLE_LENGTH: 3000`, `DAY_FOOD_MULTIPLIER: 0.5`. World modulates food spawn rate. Renderer modulates background RGB brightness (10-18 range).
 
-### 3.6 Minimap
-**File**: New section in `renderer.js` or small helper
-**Description**: Small overview map in corner showing creature density as a heatmap.
-**Implementation**: Draw to a small offscreen canvas (160x90), one pixel per 10x10 world area, color by creature count.
+### 3.6 Minimap -- DONE
+160x90 canvas in top-left corner. Shows colored creature dots, green/red food pixels, zone highlights, selected creature marker. Rendered each frame in `renderer.renderMinimap()`.
 
 ---
 
-## Phase 4: Simulation Depth (Priority: MEDIUM-HIGH)
+## Phase 4: Simulation Depth (Priority: MEDIUM-HIGH) -- PARTIALLY COMPLETED
 
-### 4.1 Predator/Prey Specialization
-**File**: `creature.js`, `world.js`
-**Description**: Currently aggression is a body gene but doesn't strongly influence behavior (the brain decides). Add a visual indicator and make aggression affect attack damage/range.
-**Implementation**:
-- Creatures with `aggression > 0.7` get a red tint overlay and slightly larger attack range
-- Creatures with `aggression < 0.3` get a slight speed bonus (prey adaptation)
-- This creates stronger evolutionary pressure for specialization
+### 4.1 Predator/Prey Specialization -- DONE
+- Aggression > 0.7: red tint overlay + attack range bonus (up to +30%)
+- Aggression < 0.3: speed bonus (up to +15%)
+- Implemented in world.js (_checkAttacking), creature.js (speed calc), renderer.js (red overlay)
 
-### 4.2 Creature Memory / Recurrence
-**File**: `neural.js`, `config.js`
-**Description**: Add 2-4 recurrent inputs to the neural network — the previous tick's outputs fed back as inputs. This gives creatures simple "memory" for more complex behaviors.
-**Implementation**:
-- Increase NN_INPUT_SIZE from 12 to 16
-- Inputs 12-15: previous outputs[0-3]
-- Update `buildSensoryInputs()` in world.js to append previous outputs
-- Store `lastOutputs` on creature (already stored on brain.lastOutputs)
+### 4.2 Creature Memory / Recurrence -- DONE
+NN_INPUT_SIZE: 12→16. Inputs 12-15 are brain.lastOutputs from previous tick. Updated config.js, world.js (buildSensoryInputs), renderer.js (INPUT_LABELS).
 
-### 4.3 Food Types
-**File**: `world.js`, `renderer.js`, `config.js`
-**Description**: Two food types — plants (green, common, low energy) and meat (red, rare, appears where creatures die, high energy). This creates ecological niches.
-**Implementation**:
-- Food objects get a `type` field: 'plant' or 'meat'
-- Meat spawns at death locations (modify creature:die listener)
-- Renderer colors them differently (green vs red glow)
-- Plant energy: 25, Meat energy: 60
+### 4.3 Food Types -- DONE
+- Food objects have `type: 'plant'|'meat'` field
+- Config: `MEAT_ENERGY: 60`, `MEAT_SPAWN_CHANCE: 0.7`
+- Meat spawns at death locations via creature:die event listener
+- Renderer: plants=green glow, meat=red glow, different core colors
+- Meat is slightly larger (FOOD_SIZE + 1.5)
 
-### 4.4 Terrain / Zones
-**File**: `world.js`, `renderer.js`, `config.js`
-**Description**: Add 2-3 circular "fertile zones" where food spawns more frequently, creating migration pressure and territorial behavior.
-**Implementation**:
-- `World.zones = [{x, y, radius, spawnMultiplier}]` — 2-3 random zones
-- Food spawn probability multiplied by zone influence
-- Renderer draws faint green circles for fertile zones
-- Zones slowly drift over time (very slow — 0.01 px/tick)
+### 4.4 Terrain / Zones -- DONE
+2-3 fertile zones with radii 120-200px, 2-4x food spawn boost. 40% chance food spawns in a zone. Zones drift slowly and bounce off edges. Rendered as faint green radial gradients. Visible on minimap.
 
 ### 4.5 Creature Communication (Advanced)
 **File**: `creature.js`, `neural.js`, `world.js`
@@ -123,7 +84,7 @@ The core simulation is functional: creatures with neural network brains evolve i
 
 ---
 
-## Phase 5: UI & Quality of Life (Priority: MEDIUM)
+## Phase 5: UI & Quality of Life (Priority: MEDIUM) -- PARTIALLY COMPLETED
 
 ### 5.1 Creature Lineage Tracking
 **File**: `creature.js`, `ui.js`, `world.js`
@@ -138,22 +99,20 @@ The core simulation is functional: creatures with neural network brains evolve i
 **File**: `stats.js`
 **Description**: Add births/deaths rate overlay, species count line, and ability to click on the chart to jump to that time (or at least show tooltip).
 
-### 5.3 Settings Panel
-**File**: New `settings.js` or extend `ui.js`, add HTML section
-**Description**: Sliders for key simulation parameters (mutation rate, food spawn rate, energy drain). Allow live tuning without code changes.
-**Implementation**:
-- Add a collapsible "Settings" section to sidebar
-- Range inputs for: MUTATION_RATE, MUTATION_STRENGTH, FOOD_SPAWN_RATE, CREATURE_ENERGY_DRAIN
-- On change, update `EcoSim.Config` values directly (they're read each tick)
+### 5.3 Settings Panel -- DONE
+- Collapsible section in sidebar (click title to toggle)
+- 5 live sliders: Mutation Rate, Mutation Strength, Food Spawn Rate, Energy Drain, Day Cycle Length
+- Updates Config values directly on input change
+- Implemented in index.html (HTML), style.css (slider styles), ui.js (initSettings method)
 
-### 5.4 Save/Load State
-**File**: New `serialization.js`
-**Description**: Save the entire world state to JSON and reload it. Enables bookmarking interesting evolutionary moments.
-**Implementation**:
-- Serialize: all creatures (position, genes, brain genome, stats), food positions, world tick/counters
-- Deserialize: reconstruct all objects
-- Use localStorage or download as .json file
-- Add Save/Load buttons to UI
+### 5.4 Save/Load State -- DONE (v2.2: Multi-Universe + File-Based)
+Complete rewrite to multi-universe system with auto-save:
+- `serialization.js` (~415 lines) — server API + localStorage fallback
+- `server.py` (~199 lines) — Python HTTP server with REST API for file-based saves
+- `saves/` directory — JSON universe files on disk
+- Universe panel in sidebar: Save, New, Export, Import buttons + clickable universe list
+- Auto-save every 3000 ticks with visual indicator
+- Auto-saves current universe before switching to another
 
 ### 5.5 Screenshot / GIF Export
 **File**: New functionality in `ui.js`
@@ -218,14 +177,19 @@ When continuing development:
 5. **Test after each change** — refresh browser, check console, verify visuals
 6. **Performance matters** — the simulation runs 60fps with hundreds of creatures. Profile before/after changes to render/update loops.
 
-### Recommended Build Order
-1. Phase 2 (bug fixes) — quick wins, ~30 min
-2. Phase 4.1-4.3 (predator/prey, food types) — adds gameplay depth, ~1 hr
-3. Phase 3.1, 3.3, 3.5 (ambient particles, food animation, day/night) — visual polish, ~45 min
-4. Phase 5.3 (settings panel) — user control, ~30 min
-5. Phase 4.2 (creature memory) — neural net enhancement, ~45 min
-6. Phase 5.4 (save/load) — persistence, ~1 hr
-7. Everything else as time permits
+### Recommended Build Order (Updated)
+~~1. Phase 2 (bug fixes)~~ DONE
+~~2. Phase 4.1, 4.3 (predator/prey, food types)~~ DONE
+~~3. Phase 3.1-3.6 (all visual enhancements)~~ DONE
+~~4. Phase 5.3 (settings panel)~~ DONE
+~~5. Phase 4.2 (creature memory)~~ DONE
+~~6. Phase 5.4 (save/load)~~ DONE
+~~7. Phase 4.4 (terrain zones)~~ DONE
+8. **NEXT**: Phase 4.5 (creature communication) — signal output/input
+9. Phase 5.1 (lineage tracking) + Phase 5.2 (graph improvements)
+10. Phase 5.5 (screenshot) + Phase 5.6 (fullscreen)
+11. Phase 6 (performance optimization — if needed)
+12. Phase 7 (advanced: camera pan/zoom, sound, evolution timeline)
 
 ---
 

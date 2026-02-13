@@ -33,13 +33,16 @@
     'food_dx', 'food_dy', 'food_d',
     'cr_dx', 'cr_dy', 'cr_d', 'cr_sz',
     'energy',
-    'wall_l', 'wall_r', 'wall_u', 'wall_d'
+    'wall_l', 'wall_r', 'wall_u', 'wall_d',
+    'mem_0', 'mem_1', 'mem_2', 'mem_3'
   ];
   var OUTPUT_LABELS = ['turn', 'speed', 'eat', 'repro'];
 
   function Renderer(worldCanvas, brainCanvas) {
     this.worldCanvas = worldCanvas;
     this.brainCanvas = brainCanvas;
+    this.minimapCanvas = document.getElementById('minimap');
+    this.minimapCtx = this.minimapCanvas ? this.minimapCanvas.getContext('2d') : null;
 
     this.ctx = worldCanvas.getContext('2d');
     this.brainCtx = brainCanvas.getContext('2d');
@@ -48,6 +51,19 @@
     this.showVision = false;
 
     this._dashOffset = 0;
+
+    // Ambient background particles
+    this._ambientParticles = [];
+    for (var i = 0; i < 40; i++) {
+      this._ambientParticles.push({
+        x: Math.random() * Config.WORLD_WIDTH,
+        y: Math.random() * Config.WORLD_HEIGHT,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        alpha: 0.02 + Math.random() * 0.03,
+        size: 1 + Math.random() * 2
+      });
+    }
     this._dpr = window.devicePixelRatio || 1;
 
     this.brainCanvas.width = 300 * this._dpr;
@@ -91,7 +107,11 @@
     var offsetX = (logicalWidth - world.width * scale) * 0.5;
     var offsetY = (logicalHeight - world.height * scale) * 0.5;
 
-    ctx.fillStyle = BG_COLOR;
+    // Day/night background color
+    var dayPhase = world.getDayNightPhase ? world.getDayNightPhase() : 0.5;
+    var bgBrightness = 10 + Math.round(dayPhase * 8); // 10-18 range
+    var bgBlue = 23 + Math.round(dayPhase * 6);       // 23-29 range
+    ctx.fillStyle = 'rgb(' + bgBrightness + ',' + (bgBrightness + 4) + ',' + bgBlue + ')';
     ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
     ctx.save();
@@ -99,7 +119,11 @@
     ctx.scale(scale, scale);
 
     this.drawGrid(ctx, world.width, world.height);
+    this.drawZones(ctx, world.zones);
+    this.drawAmbientParticles(ctx, world.width, world.height);
     this.drawFood(ctx, world.food);
+
+    this.drawDyingCreatures(ctx, world.dyingCreatures);
 
     if (this.showTrails) {
       this.drawCreatureTrails(ctx, world.creatures);
@@ -117,6 +141,60 @@
     }
 
     ctx.restore();
+
+    this.renderMinimap(world);
+  };
+
+  Renderer.prototype.renderMinimap = function (world) {
+    var ctx = this.minimapCtx;
+    if (!ctx) return;
+
+    var mw = 160;
+    var mh = 90;
+    var sx = mw / world.width;
+    var sy = mh / world.height;
+
+    ctx.clearRect(0, 0, mw, mh);
+    ctx.fillStyle = 'rgba(10, 14, 23, 0.9)';
+    ctx.fillRect(0, 0, mw, mh);
+
+    // Draw zones as faint circles
+    var i, z;
+    for (i = 0; i < world.zones.length; i++) {
+      z = world.zones[i];
+      ctx.fillStyle = 'rgba(80, 200, 80, 0.15)';
+      ctx.beginPath();
+      ctx.arc(z.x * sx, z.y * sy, z.radius * sx, 0, TAU);
+      ctx.fill();
+    }
+
+    // Draw food as tiny green/red dots
+    var f;
+    for (i = 0; i < world.food.length; i++) {
+      f = world.food[i];
+      ctx.fillStyle = f.type === 'meat' ? 'rgba(255, 80, 60, 0.5)' : 'rgba(124, 255, 107, 0.4)';
+      ctx.fillRect(f.x * sx, f.y * sy, 1, 1);
+    }
+
+    // Draw creatures as colored dots
+    var c;
+    for (i = 0; i < world.creatures.length; i++) {
+      c = world.creatures[i];
+      ctx.fillStyle = 'hsla(' + round(c.bodyGenes.hue) + ', 70%, 60%, 0.8)';
+      ctx.beginPath();
+      ctx.arc(c.x * sx, c.y * sy, max(1, c.size * sx * 0.5), 0, TAU);
+      ctx.fill();
+    }
+
+    // Draw selected creature marker
+    if (world.selectedCreature && world.selectedCreature.alive) {
+      var sc = world.selectedCreature;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(sc.x * sx, sc.y * sy, 4, 0, TAU);
+      ctx.stroke();
+    }
   };
 
   Renderer.prototype.drawGrid = function (ctx, width, height) {
@@ -136,28 +214,109 @@
     ctx.stroke();
   };
 
+  Renderer.prototype.drawZones = function (ctx, zones) {
+    if (!zones) return;
+    var i, z, grad;
+
+    for (i = 0; i < zones.length; i++) {
+      z = zones[i];
+      grad = ctx.createRadialGradient(z.x, z.y, 0, z.x, z.y, z.radius);
+      grad.addColorStop(0, 'rgba(80, 200, 80, 0.06)');
+      grad.addColorStop(0.6, 'rgba(80, 200, 80, 0.03)');
+      grad.addColorStop(1, 'rgba(80, 200, 80, 0)');
+
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(z.x, z.y, z.radius, 0, TAU);
+      ctx.fill();
+
+      // Subtle border
+      ctx.strokeStyle = 'rgba(80, 200, 80, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(z.x, z.y, z.radius, 0, TAU);
+      ctx.stroke();
+    }
+  };
+
+  Renderer.prototype.drawAmbientParticles = function (ctx, worldW, worldH) {
+    var particles = this._ambientParticles;
+    var i, p;
+
+    for (i = 0; i < particles.length; i++) {
+      p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+
+      // Wrap around edges
+      if (p.x < 0) p.x += worldW;
+      if (p.x > worldW) p.x -= worldW;
+      if (p.y < 0) p.y += worldH;
+      if (p.y > worldH) p.y -= worldH;
+
+      ctx.fillStyle = 'rgba(100, 180, 255, ' + p.alpha + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, TAU);
+      ctx.fill();
+    }
+  };
+
   Renderer.prototype.drawFood = function (ctx, food) {
-    var i, f, pulse, glowRadius, grad;
+    var i, f, pulse, glowRadius, grad, isMeat;
+    var spawnFade;
 
     for (i = 0; i < food.length; i++) {
       f = food[i];
+      isMeat = f.type === 'meat';
       pulse = 0.7 + 0.3 * sin(f.age * 0.05);
+      // Fade in over first 10 ticks
+      spawnFade = min(1, f.age / 10);
       glowRadius = (f.size + 6) * pulse;
 
-      grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, glowRadius);
-      grad.addColorStop(0, 'rgba(124, 255, 107, ' + (0.35 * f.glow * pulse) + ')');
-      grad.addColorStop(0.5, 'rgba(124, 255, 107, ' + (0.12 * f.glow * pulse) + ')');
-      grad.addColorStop(1, 'rgba(124, 255, 107, 0)');
+      if (isMeat) {
+        grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, glowRadius);
+        grad.addColorStop(0, 'rgba(255, 80, 60, ' + (0.35 * f.glow * pulse * spawnFade) + ')');
+        grad.addColorStop(0.5, 'rgba(255, 80, 60, ' + (0.12 * f.glow * pulse * spawnFade) + ')');
+        grad.addColorStop(1, 'rgba(255, 80, 60, 0)');
+      } else {
+        grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, glowRadius);
+        grad.addColorStop(0, 'rgba(124, 255, 107, ' + (0.35 * f.glow * pulse * spawnFade) + ')');
+        grad.addColorStop(0.5, 'rgba(124, 255, 107, ' + (0.12 * f.glow * pulse * spawnFade) + ')');
+        grad.addColorStop(1, 'rgba(124, 255, 107, 0)');
+      }
 
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(f.x, f.y, glowRadius, 0, TAU);
       ctx.fill();
 
-      ctx.fillStyle = '#7cff6b';
+      ctx.fillStyle = isMeat ? '#ff5040' : '#7cff6b';
+      ctx.globalAlpha = spawnFade;
       ctx.beginPath();
       ctx.arc(f.x, f.y, f.size, 0, TAU);
       ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  };
+
+  Renderer.prototype.drawDyingCreatures = function (ctx, dying) {
+    if (!dying) return;
+    var i, d, progress, alpha, sz;
+
+    for (i = 0; i < dying.length; i++) {
+      d = dying[i];
+      progress = 1 - (d.ticksLeft / 20); // 0 at death, 1 at fully faded
+      alpha = (1 - progress) * 0.6;
+      sz = d.size * (1 - progress * 0.5); // shrink to half size
+
+      if (alpha <= 0 || sz <= 0) continue;
+
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'hsla(' + round(d.hue) + ', ' + round(d.saturation) + '%, 40%, 1)';
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, sz, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
     }
   };
 
@@ -211,9 +370,20 @@
       ctx.arc(cx, cy, r, 0, TAU);
       ctx.fill();
 
-      // Direction bump
       var dirX = cos(angle);
       var dirY = sin(angle);
+
+      // Large creatures (>10): extra tail segment behind body
+      if (r > 10) {
+        var tailDist = r * 0.7;
+        var tailR = r * 0.45;
+        ctx.fillStyle = creature.getColor(0.5);
+        ctx.beginPath();
+        ctx.arc(cx - dirX * tailDist, cy - dirY * tailDist, tailR, 0, TAU);
+        ctx.fill();
+      }
+
+      // Direction bump (nose)
       var bumpDist = r * 0.85;
       var bumpR = r * 0.35;
 
@@ -222,33 +392,44 @@
       ctx.arc(cx + dirX * bumpDist, cy + dirY * bumpDist, bumpR, 0, TAU);
       ctx.fill();
 
-      // Eyes
-      var eyeR = max(1, r * 0.18);
-      var eyeDist = r * 0.55;
-      var eyeLX = cx + cos(angle - eyeOffset) * eyeDist;
-      var eyeLY = cy + sin(angle - eyeOffset) * eyeDist;
-      var eyeRX = cx + cos(angle + eyeOffset) * eyeDist;
-      var eyeRY = cy + sin(angle + eyeOffset) * eyeDist;
+      // Eyes — skip for very small creatures (<6)
+      if (r >= 6) {
+        var eyeR = max(1, r * 0.18);
+        var eyeDist = r * 0.55;
+        var eyeLX = cx + cos(angle - eyeOffset) * eyeDist;
+        var eyeLY = cy + sin(angle - eyeOffset) * eyeDist;
+        var eyeRX = cx + cos(angle + eyeOffset) * eyeDist;
+        var eyeRY = cy + sin(angle + eyeOffset) * eyeDist;
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.beginPath();
-      ctx.arc(eyeLX, eyeLY, eyeR, 0, TAU);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(eyeRX, eyeRY, eyeR, 0, TAU);
-      ctx.fill();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.beginPath();
+        ctx.arc(eyeLX, eyeLY, eyeR, 0, TAU);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(eyeRX, eyeRY, eyeR, 0, TAU);
+        ctx.fill();
 
-      // Pupils
-      var pupilR = max(0.5, eyeR * 0.5);
-      var pupilDist = r * 0.65;
+        // Pupils
+        var pupilR = max(0.5, eyeR * 0.5);
+        var pupilDist = r * 0.65;
 
-      ctx.fillStyle = '#0a0e17';
-      ctx.beginPath();
-      ctx.arc(cx + cos(angle - eyeOffset) * pupilDist, cy + sin(angle - eyeOffset) * pupilDist, pupilR, 0, TAU);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(cx + cos(angle + eyeOffset) * pupilDist, cy + sin(angle + eyeOffset) * pupilDist, pupilR, 0, TAU);
-      ctx.fill();
+        ctx.fillStyle = '#0a0e17';
+        ctx.beginPath();
+        ctx.arc(cx + cos(angle - eyeOffset) * pupilDist, cy + sin(angle - eyeOffset) * pupilDist, pupilR, 0, TAU);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + cos(angle + eyeOffset) * pupilDist, cy + sin(angle + eyeOffset) * pupilDist, pupilR, 0, TAU);
+        ctx.fill();
+      }
+
+      // Predator red tint for high aggression
+      if (creature.bodyGenes.aggression > 0.7) {
+        var predAlpha = (creature.bodyGenes.aggression - 0.7) * 0.6; // 0 to ~0.18
+        ctx.fillStyle = 'rgba(255, 40, 20, ' + predAlpha + ')';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, TAU);
+        ctx.fill();
+      }
 
       // Reproduction glow
       if (creature.energy > REPRODUCTION_THRESHOLD) {

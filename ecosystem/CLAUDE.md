@@ -5,7 +5,7 @@ EcoSim is a fully interactive, browser-based artificial life simulation where di
 
 **Created**: Feb 2026
 **Tech**: Vanilla JS, HTML5 Canvas, no frameworks or build tools
-**Total**: ~3,800 lines across 10 files
+**Total**: ~5,200 lines across 12 files (v2.2 with file-based saves)
 
 ## Architecture
 
@@ -13,22 +13,27 @@ EcoSim is a fully interactive, browser-based artificial life simulation where di
 ```
 ecosystem/
 ├── index.html              # Page layout, loads all scripts in order
+├── server.py               # Python HTTP server with REST API for file-based saves
+├── saves/                  # Universe save files (JSON) — created automatically
 ├── css/
-│   └── style.css           # Dark-themed UI (~555 lines)
+│   └── style.css           # Dark-themed UI (~700 lines)
 └── js/
-    ├── config.js            # Shared constants, event bus, ID generator (100 lines)
+    ├── config.js            # Shared constants, event bus, ID generator (~110 lines)
     ├── neural.js            # Feedforward neural network with Float32Arrays (307 lines)
+    ├── serialization.js     # Multi-universe save system, server API + localStorage fallback (~415 lines)
     ├── creature.js          # Creature class: brain, body genes, lifecycle (519 lines)
     ├── world.js             # Simulation engine: spatial grid, physics, food (851 lines)
-    ├── renderer.js          # Canvas rendering: creatures, food, particles, brain viz (491 lines)
+    ├── renderer.js          # Canvas rendering: creatures, food, particles, brain viz (600+ lines)
     ├── stats.js             # Population/species charts, statistics tracking (419 lines)
-    ├── ui.js                # Controls, click interaction, keyboard shortcuts (320 lines)
-    └── main.js              # Game loop, initialization, error handling (107 lines)
+    ├── ui.js                # Controls, click interaction, universe panel (450+ lines)
+    └── main.js              # Game loop, initialization, auto-save hook (113 lines)
 ```
 
 ### Load Order (Critical)
 Scripts load via `<script>` tags in index.html in dependency order:
-1. config.js → 2. neural.js → 3. creature.js → 4. world.js → 5. renderer.js → 6. stats.js → 7. ui.js → 8. main.js
+1. config.js → 2. neural.js → 3. serialization.js → 4. creature.js → 5. world.js → 6. renderer.js → 7. stats.js → 8. ui.js → 9. main.js
+
+Note: serialization.js loads early and runs `init()` immediately to detect whether the server API is available.
 
 All modules use IIFEs and attach to `window.EcoSim` namespace.
 
@@ -140,19 +145,47 @@ Events (all emitted by creature.js methods only — world.js just listens):
 3. **Click coordinate mapping**: Fixed ui.js to use same aspect-ratio scaling as renderer (min(scaleX, scaleY) with offsets).
 4. **Missing CSS classes**: Added `.inspector-row` and `.inspector-panel.visible` styles.
 
+## v2 Enhancements (Feb 2026)
+1. **Day/Night Cycle**: Background brightness and food spawn rate modulate on a sin wave cycle (config: DAY_CYCLE_LENGTH=3000 ticks). Darker nights, brighter days. Food spawns faster during day.
+2. **Food Types**: Plants (green, 35 energy) and Meat (red, 60 energy). Meat drops at creature death locations (70% chance). Different renderer colors/glows.
+3. **Food Spawn Animation**: Food fades in over 10 ticks instead of popping in instantly.
+4. **Death Animation**: Dead creatures fade out and shrink over 20 ticks via `world.dyingCreatures` array.
+5. **Predator/Prey Specialization**: High aggression (>0.7) creatures get red tint overlay + larger attack range. Low aggression (<0.3) get up to 15% speed bonus. Creates evolutionary pressure.
+6. **Ambient Background Particles**: 40 slowly drifting faint blue particles for atmospheric feel. Wrap around edges.
+7. **Settings Panel**: Collapsible panel with live sliders for Mutation Rate, Mutation Strength, Food Spawn Rate, Energy Drain, Day Cycle Length. Updates `Config` values in real time.
+8. **Bug Fixes**: lastAction now resets at start of update(); added .action-btn.active CSS.
+9. **Creature Memory (Recurrence)**: NN inputs expanded from 12→16. Inputs 12-15 are previous tick's outputs, fed back as memory. Creatures can now form simple temporal behaviors.
+10. **Terrain Fertile Zones**: 2-3 circular zones where food spawns 2-4x faster. Rendered as faint green radial gradients. Slowly drift and bounce off edges.
+11. **Minimap**: 160x90 canvas in top-left corner showing all creatures (colored dots), food (green/red pixels), zones, and selected creature marker.
+12. **Size-Based Creature Detail**: Creatures with size>10 get a tail segment. Creatures with size<6 skip eyes for simpler rendering.
+13. **Save/Load System**: New `serialization.js` module. Quick Save/Load to localStorage, Download as .json, Load from file. Serializes all creatures (position, genes, brain genome, stats), food, zones, counters.
+14. **Multi-Universe Save System (v2.2)**: Complete rewrite of serialization.js. Multiple named universes with auto-save every 3000 ticks. Universe panel in sidebar with Save/New/Export/Import buttons and clickable universe list.
+15. **File-Based Saving**: New `server.py` Python HTTP server with REST API (`/api/universes`). Saves universes as JSON files in `ecosystem/saves/` directory. Falls back to localStorage when server unavailable (e.g., file:// protocol).
+
+### Save System Architecture
+- **Server mode**: `python3 server.py` → serves app at `http://localhost:8000` + provides REST API for CRUD operations on universe files
+- **API endpoints**: `GET /api/universes` (list), `GET/POST/DELETE /api/universes/<name>` (load/save/delete)
+- **localStorage fallback**: Automatically detected at init — if server API returns 200, use files; otherwise use `localStorage`
+- **Auto-save**: Every 3000 ticks, saves current universe. Visual indicator flashes in sidebar.
+- **Universe switching**: Auto-saves current universe before loading a different one to prevent data loss.
+- **File format**: JSON with version field, all creatures (position, genes, full brain genome), food, zones, tick counter, stats
+
 ## Current State
-- **Status**: FUNCTIONAL — simulation runs, creatures move/eat/reproduce/die, charts work, UI works
+- **Status**: FUNCTIONAL v2.2 — 12 files, ~5,200 lines
 - **Known minor issues**:
   - Info overlay `textContent` replaces child spans (cosmetic — works fine as plain text)
   - Stats panel innerHTML replaces HTML-defined stat rows (functional — stats.js takes over)
-  - `lastAction` doesn't auto-reset to 'idle' between ticks (flash effects may persist 1 extra tick)
 
 ## How to Run
 ```bash
+# Option 1: With file-based saving (recommended)
+cd ecosystem && python3 server.py
+# Then visit http://localhost:8000
+# Saves go to ecosystem/saves/ as JSON files
+
+# Option 2: Without server (localStorage fallback)
 open ecosystem/index.html
-# or
-python3 -m http.server 8000 -d ecosystem/
-# then visit http://localhost:8000
+# Saves go to browser localStorage instead of files
 ```
 
 ## Development Notes
