@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EcoSim — Evolutionary Ecosystem Simulator</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Main simulation canvas -->
+    <div id="world-container">
+      <canvas id="world-canvas"></canvas>
+    </div>
+
+    <!-- Right sidebar -->
+    <aside id="sidebar">
+      <header id="sidebar-header">
+        <h1 class="title">EcoSim</h1>
+        <p class="subtitle">Evolutionary Ecosystem</p>
+      </header>
+
+      <!-- Population Chart -->
+      <section class="panel">
+        <h2 class="panel-title">Population</h2>
+        <div class="chart-wrapper">
+          <canvas id="pop-chart" width="300" height="120"></canvas>
+        </div>
+      </section>
+
+      <!-- Species Chart -->
+      <section class="panel">
+        <h2 class="panel-title">Species</h2>
+        <div class="chart-wrapper">
+          <canvas id="species-chart" width="300" height="100"></canvas>
+        </div>
+      </section>
+
+      <!-- Statistics -->
+      <section class="panel">
+        <h2 class="panel-title">Statistics</h2>
+        <div id="stats-panel">
+          <div class="stat-row">
+            <span class="stat-label">Generation</span>
+            <span class="stat-value" id="stat-generation">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Population</span>
+            <span class="stat-value" id="stat-population">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Births</span>
+            <span class="stat-value" id="stat-births">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Deaths</span>
+            <span class="stat-value" id="stat-deaths">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Avg Energy</span>
+            <span class="stat-value" id="stat-avg-energy">0.0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Avg Age</span>
+            <span class="stat-value" id="stat-avg-age">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Oldest</span>
+            <span class="stat-value" id="stat-oldest">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Most Fit</span>
+            <span class="stat-value" id="stat-most-fit">0.0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Food Count</span>
+            <span class="stat-value" id="stat-food-count">0</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Mutations</span>
+            <span class="stat-value" id="stat-mutations">0</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Controls -->
+      <section class="panel">
+        <h2 class="panel-title">Controls</h2>
+        <div class="control-group">
+          <label class="control-label">Simulation Speed</label>
+          <div class="button-row">
+            <button class="speed-btn" data-speed="0" title="Pause">&#x23F8;</button>
+            <button class="speed-btn active" data-speed="1">1x</button>
+            <button class="speed-btn" data-speed="2">2x</button>
+            <button class="speed-btn" data-speed="5">5x</button>
+            <button class="speed-btn" data-speed="10">10x</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label class="control-label">Overlays</label>
+          <div class="button-row">
+            <button class="toggle-btn" data-toggle="trails">Trails</button>
+            <button class="toggle-btn" data-toggle="vision">Vision</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <label class="control-label">Actions</label>
+          <div class="button-column">
+            <button class="action-btn" id="add-food-btn">Add Food (click)</button>
+            <button class="action-btn" id="spawn-btn">Spawn Creature</button>
+            <button class="action-btn danger" id="reset-btn">Reset</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Selected Creature Inspector -->
+      <section class="panel inspector-panel" id="creature-inspector">
+        <h2 class="panel-title">Selected Creature</h2>
+        <p class="placeholder-text" id="inspector-placeholder">Click a creature to inspect</p>
+        <div class="chart-wrapper">
+          <canvas id="brain-canvas" width="300" height="180"></canvas>
+        </div>
+        <div id="creature-details"></div>
+      </section>
+    </aside>
+
+    <!-- Bottom-left info overlay -->
+    <div id="info-overlay">
+      <span id="overlay-gen">Gen: 0</span>
+      <span class="overlay-sep">|</span>
+      <span id="overlay-pop">Pop: 0</span>
+      <span class="overlay-sep">|</span>
+      <span id="overlay-fps">FPS: 0</span>
+    </div>
+
+  </div>
+
+  <!-- Scripts loaded in dependency order -->
+  <script src="js/config.js"></script>
+  <script src="js/neural.js"></script>
+  <script src="js/creature.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/stats.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
