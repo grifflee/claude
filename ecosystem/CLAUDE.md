@@ -5,7 +5,7 @@ EcoSim is a fully interactive, browser-based artificial life simulation where di
 
 **Created**: Feb 2026
 **Tech**: Vanilla JS, HTML5 Canvas, no frameworks or build tools
-**Total**: ~5,200 lines across 12 files (v2.2 with file-based saves)
+**Total**: ~5,500 lines across 12 files (v2.3 with camera, communication, fullscreen)
 
 ## Architecture
 
@@ -51,10 +51,10 @@ ui.js ← main.js
 ## Core Systems
 
 ### Neural Network (neural.js)
-- **Architecture**: 12 inputs → 10 hidden (tanh) → 8 hidden (tanh) → 4 outputs (tanh)
+- **Architecture**: 17 inputs → 10 hidden (tanh) → 8 hidden (tanh) → 5 outputs (tanh)
 - **Storage**: Float32Arrays for all weights/biases (performance)
 - **Pre-allocated** intermediate activation arrays to avoid GC in hot path
-- **Total params**: 120 + 10 + 80 + 8 + 32 + 4 = 254 parameters per brain
+- **Total params**: 170 + 10 + 80 + 8 + 40 + 5 = 313 parameters per brain
 - **Key class**: `EcoSim.NeuralNetwork`
   - `forward(inputs)` — hot path, called per creature per tick
   - `mutate(rate, strength)` — gaussian-ish noise, clamps to [-2,2]
@@ -67,8 +67,8 @@ ui.js ← main.js
   - Each gene has a defined range in `GENE_RANGES`
   - Hue wraps around 0-360
 - **Species ID**: Quantized `hue_size` (hue to nearest 30°, size to nearest 3)
-- **Neural inputs** (12): food direction/distance, creature direction/distance/relative size, own energy, 4 wall proximities
-- **Neural outputs** (4): turn, speed, eat/attack desire, reproduce desire
+- **Neural inputs** (17): food direction/distance, creature direction/distance/relative size, own energy, 4 wall proximities, 4 memory (prev outputs), nearest creature's signal
+- **Neural outputs** (5): turn, speed, eat/attack desire, reproduce desire, signal broadcast
 - **Lifecycle**: energy drains per tick based on speed + size / efficiency. Dies at energy ≤ 0.
 - **Reproduction**: requires energy > 160, age > 200, cooldown expired. Asexual by default, sexual if nearby compatible partner (5% chance).
 - **Events emitted**: `creature:eat`, `creature:attack`, `creature:reproduce`, `creature:die`
@@ -170,8 +170,15 @@ Events (all emitted by creature.js methods only — world.js just listens):
 - **Universe switching**: Auto-saves current universe before loading a different one to prevent data loss.
 - **File format**: JSON with version field, all creatures (position, genes, full brain genome), food, zones, tick counter, stats
 
+## v2.3 Enhancements (Feb 2026)
+16. **Creature Communication (Signals)**: NN expanded to 17 inputs, 5 outputs. Output[4] = broadcast signal (-1 to 1). Input[16] = nearest creature's signal. Positive signals show as yellow rings, negative as purple. Enables emergent communication between creatures.
+17. **Camera Pan/Zoom**: Scroll wheel zooms toward cursor. Right-click drag pans. WASD keyboard movement. Camera auto-follows selected creature when zoomed in (smooth lerp). Home key resets view. Zoom indicator in top-left.
+18. **Screenshot Export**: Press 'p' or click button to download canvas as PNG with tick/generation in filename.
+19. **Fullscreen Mode**: Double-click canvas to toggle fullscreen. Minimap, zoom indicator, and info overlay all visible in fullscreen.
+20. **Backwards-Compatible Save Migration**: Old saves (v2, 16-input/4-output NN) automatically pad genome arrays with small random values when loaded, preserving evolved behaviors while adding new capabilities.
+
 ## Current State
-- **Status**: FUNCTIONAL v2.2 — 12 files, ~5,200 lines
+- **Status**: FUNCTIONAL v2.3 — 12 files, ~5,500 lines
 - **Known minor issues**:
   - Info overlay `textContent` replaces child spans (cosmetic — works fine as plain text)
   - Stats panel innerHTML replaces HTML-defined stat rows (functional — stats.js takes over)

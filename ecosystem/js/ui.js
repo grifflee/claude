@@ -113,7 +113,36 @@
       });
     }
 
-    // 5b. Export/Import buttons
+    // 5b. Screenshot button
+    var screenshotBtn = document.getElementById('screenshot-btn');
+    if (screenshotBtn) {
+      screenshotBtn.addEventListener('click', function () {
+        self.takeScreenshot();
+      });
+    }
+
+    // 5c. Camera buttons
+    var cameraResetBtn = document.getElementById('camera-reset-btn');
+    if (cameraResetBtn) {
+      cameraResetBtn.addEventListener('click', function () {
+        renderer.resetCamera();
+      });
+    }
+
+    var cameraFollowBtn = document.getElementById('camera-follow-btn');
+    if (cameraFollowBtn) {
+      cameraFollowBtn.addEventListener('click', function () {
+        if (world.selectedCreature && world.selectedCreature.alive) {
+          renderer.camera.x = world.selectedCreature.x;
+          renderer.camera.y = world.selectedCreature.y;
+          if (renderer.camera.zoom < 2) {
+            renderer.camera.zoom = 3; // zoom in to follow
+          }
+        }
+      });
+    }
+
+    // 5d. Export/Import buttons
     if (this.downloadBtn) {
       this.downloadBtn.addEventListener('click', function () {
         if (EcoSim.Serialization) {
@@ -144,22 +173,12 @@
       });
     }
 
-    // Helper: convert page click coords to world coords (matching renderer transform)
+    // Helper: convert page click coords to world coords (uses renderer camera transform)
     function canvasToWorld(event) {
       var rect = canvas.getBoundingClientRect();
-      var logicalW = rect.width;
-      var logicalH = rect.height;
-      var scaleX = logicalW / world.width;
-      var scaleY = logicalH / world.height;
-      var scale = Math.min(scaleX, scaleY);
-      var offsetX = (logicalW - world.width * scale) * 0.5;
-      var offsetY = (logicalH - world.height * scale) * 0.5;
       var px = event.clientX - rect.left;
       var py = event.clientY - rect.top;
-      return {
-        x: (px - offsetX) / scale,
-        y: (py - offsetY) / scale
-      };
+      return renderer.screenToWorld(px, py);
     }
 
     // 6. Canvas click
@@ -208,7 +227,63 @@
       });
     }
 
-    // 8. Keyboard shortcuts
+    // 8. Mouse wheel zoom
+    if (canvas) {
+      canvas.addEventListener('wheel', function (event) {
+        event.preventDefault();
+        var rect = canvas.getBoundingClientRect();
+        var sx = event.clientX - rect.left;
+        var sy = event.clientY - rect.top;
+        var factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+        renderer.zoomAt(sx, sy, factor);
+      }, { passive: false });
+
+      // 8b. Right-click drag to pan camera
+      var isPanning = false;
+      var panStartX = 0;
+      var panStartY = 0;
+      var panStartCamX = 0;
+      var panStartCamY = 0;
+
+      canvas.addEventListener('mousedown', function (event) {
+        if (event.button === 2) { // right-click
+          isPanning = true;
+          panStartX = event.clientX;
+          panStartY = event.clientY;
+          panStartCamX = renderer.camera.x;
+          panStartCamY = renderer.camera.y;
+          canvas.style.cursor = 'grabbing';
+          event.preventDefault();
+        }
+      });
+
+      document.addEventListener('mousemove', function (event) {
+        if (!isPanning) return;
+        var dx = event.clientX - panStartX;
+        var dy = event.clientY - panStartY;
+        renderer.camera.x = panStartCamX - dx / renderer._scale;
+        renderer.camera.y = panStartCamY - dy / renderer._scale;
+      });
+
+      document.addEventListener('mouseup', function (event) {
+        if (event.button === 2 && isPanning) {
+          isPanning = false;
+          canvas.style.cursor = self.addFoodMode ? 'crosshair' : 'default';
+        }
+      });
+
+      // Prevent context menu on canvas (for right-click pan)
+      canvas.addEventListener('contextmenu', function (event) {
+        event.preventDefault();
+      });
+
+      // 8c. Double-click to toggle fullscreen
+      canvas.addEventListener('dblclick', function () {
+        self.toggleFullscreen();
+      });
+    }
+
+    // 9. Keyboard shortcuts
     document.addEventListener('keydown', function (event) {
       var tag = event.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -244,6 +319,40 @@
         case 'Escape':
           world.selectedCreature = null;
           self.updateCreatureInspector();
+          break;
+        // Camera controls
+        case 'w': case 'W':
+          renderer.camera.y -= 30 / renderer.camera.zoom;
+          break;
+        case 'a': case 'A':
+          renderer.camera.x -= 30 / renderer.camera.zoom;
+          break;
+        case 's': case 'S':
+          renderer.camera.y += 30 / renderer.camera.zoom;
+          break;
+        case 'd': case 'D':
+          renderer.camera.x += 30 / renderer.camera.zoom;
+          break;
+        case '=': case '+':
+          renderer.camera.zoom = Math.min(12, renderer.camera.zoom * 1.2);
+          break;
+        case '-': case '_':
+          renderer.camera.zoom = Math.max(0.5, renderer.camera.zoom / 1.2);
+          break;
+        case 'Home':
+          renderer.resetCamera();
+          break;
+        case 'c':
+          if (world.selectedCreature && world.selectedCreature.alive) {
+            renderer.camera.x = world.selectedCreature.x;
+            renderer.camera.y = world.selectedCreature.y;
+            if (renderer.camera.zoom < 2) {
+              renderer.camera.zoom = 3;
+            }
+          }
+          break;
+        case 'p':
+          self.takeScreenshot();
           break;
       }
     });
@@ -313,7 +422,8 @@
         'Food Eaten: ' + creature.foodEaten + ' | Kills: ' + creature.kills,
         'Children: ' + creature.children,
         'Species: ' + creature.speciesId,
-        'Efficiency: ' + g.efficiency.toFixed(2) + ' | Aggression: ' + g.aggression.toFixed(2)
+        'Efficiency: ' + g.efficiency.toFixed(2) + ' | Aggression: ' + g.aggression.toFixed(2),
+        'Signal: ' + (creature.signal || 0).toFixed(2)
       ];
 
       var html = '';
@@ -354,6 +464,27 @@
 
     if (this._frameCount % 10 === 0) {
       this.updateCreatureInspector();
+    }
+
+    // Follow selected creature when zoomed in
+    var cam = this.renderer.camera;
+    if (cam.zoom > 1.2 && this.world.selectedCreature && this.world.selectedCreature.alive) {
+      // Smooth lerp toward creature position
+      var target = this.world.selectedCreature;
+      cam.x += (target.x - cam.x) * 0.08;
+      cam.y += (target.y - cam.y) * 0.08;
+    }
+
+    // Update zoom indicator
+    var zoomEl = document.getElementById('zoom-indicator');
+    if (zoomEl) {
+      var zoom = this.renderer.camera.zoom;
+      if (Math.abs(zoom - 1) > 0.05) {
+        zoomEl.textContent = zoom.toFixed(1) + 'x';
+        zoomEl.classList.add('visible');
+      } else {
+        zoomEl.classList.remove('visible');
+      }
     }
   };
 
@@ -487,6 +618,32 @@
     if (hours < 24) return hours + 'h ago';
     var days = Math.floor(hours / 24);
     return days + 'd ago';
+  };
+
+  // ---------------------------------------------------------------
+  // Screenshot — download canvas as PNG
+  // ---------------------------------------------------------------
+  UI.prototype.takeScreenshot = function () {
+    var canvas = this.canvas;
+    if (!canvas) return;
+    var url = canvas.toDataURL('image/png');
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'ecosim_t' + this.world.tick + '_gen' + this.world.maxGeneration + '.png';
+    a.click();
+  };
+
+  // ---------------------------------------------------------------
+  // Fullscreen toggle
+  // ---------------------------------------------------------------
+  UI.prototype.toggleFullscreen = function () {
+    var container = document.getElementById('world-container');
+    if (!container) return;
+    if (!document.fullscreenElement) {
+      container.requestFullscreen().catch(function () {});
+    } else {
+      document.exitFullscreen();
+    }
   };
 
   UI.prototype.initSettings = function () {

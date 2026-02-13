@@ -34,9 +34,10 @@
     'cr_dx', 'cr_dy', 'cr_d', 'cr_sz',
     'energy',
     'wall_l', 'wall_r', 'wall_u', 'wall_d',
-    'mem_0', 'mem_1', 'mem_2', 'mem_3'
+    'mem_0', 'mem_1', 'mem_2', 'mem_3',
+    'cr_sig'
   ];
-  var OUTPUT_LABELS = ['turn', 'speed', 'eat', 'repro'];
+  var OUTPUT_LABELS = ['turn', 'speed', 'eat', 'repro', 'signal'];
 
   function Renderer(worldCanvas, brainCanvas) {
     this.worldCanvas = worldCanvas;
@@ -49,6 +50,16 @@
 
     this.showTrails = true;
     this.showVision = false;
+
+    // Camera system
+    this.camera = {
+      x: Config.WORLD_WIDTH / 2,
+      y: Config.WORLD_HEIGHT / 2,
+      zoom: 1
+    };
+    this._scale = 1;
+    this._offsetX = 0;
+    this._offsetY = 0;
 
     this._dashOffset = 0;
 
@@ -100,12 +111,20 @@
     var logicalWidth = canvas.width / dpr;
     var logicalHeight = canvas.height / dpr;
 
-    var scaleX = logicalWidth / world.width;
-    var scaleY = logicalHeight / world.height;
-    var scale = min(scaleX, scaleY);
+    // Camera-aware transform
+    var camera = this.camera;
+    var baseScaleX = logicalWidth / world.width;
+    var baseScaleY = logicalHeight / world.height;
+    var baseScale = min(baseScaleX, baseScaleY);
+    var finalScale = baseScale * camera.zoom;
 
-    var offsetX = (logicalWidth - world.width * scale) * 0.5;
-    var offsetY = (logicalHeight - world.height * scale) * 0.5;
+    var offsetX = logicalWidth * 0.5 - camera.x * finalScale;
+    var offsetY = logicalHeight * 0.5 - camera.y * finalScale;
+
+    // Store for screenToWorld calculations
+    this._scale = finalScale;
+    this._offsetX = offsetX;
+    this._offsetY = offsetY;
 
     // Day/night background color
     var dayPhase = world.getDayNightPhase ? world.getDayNightPhase() : 0.5;
@@ -116,7 +135,7 @@
 
     ctx.save();
     ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
+    ctx.scale(finalScale, finalScale);
 
     this.drawGrid(ctx, world.width, world.height);
     this.drawZones(ctx, world.zones);
@@ -194,6 +213,22 @@
       ctx.beginPath();
       ctx.arc(sc.x * sx, sc.y * sy, 4, 0, TAU);
       ctx.stroke();
+    }
+
+    // Draw camera viewport rectangle (only when zoomed in)
+    var camera = this.camera;
+    if (camera.zoom > 1.05) {
+      var canvas = this.worldCanvas;
+      var dpr = this._dpr;
+      var lw = canvas.width / dpr;
+      var lh = canvas.height / dpr;
+      var vpW = lw / this._scale;
+      var vpH = lh / this._scale;
+      var vpX = (camera.x - vpW * 0.5) * sx;
+      var vpY = (camera.y - vpH * 0.5) * sy;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(vpX, vpY, vpW * sx, vpH * sy);
     }
   };
 
@@ -441,6 +476,22 @@
         ctx.stroke();
       }
 
+      // Signal visualization — ring whose color indicates signal value
+      if (creature.signal && abs(creature.signal) > 0.3) {
+        var sigVal = creature.signal;
+        var sigAlpha = (abs(sigVal) - 0.3) * 0.5; // 0 to ~0.35
+        var sigRadius = r + 5 + abs(sigVal) * 3;
+        if (sigVal > 0) {
+          ctx.strokeStyle = 'rgba(255, 220, 50, ' + sigAlpha + ')';
+        } else {
+          ctx.strokeStyle = 'rgba(180, 50, 255, ' + sigAlpha + ')';
+        }
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, sigRadius, 0, TAU);
+        ctx.stroke();
+      }
+
       // Action flash rings
       if (creature.lastAction === 'attacking') {
         ctx.strokeStyle = 'rgba(255, 60, 30, 0.6)';
@@ -665,6 +716,46 @@
       var oPos = nodePositions[3][ni];
       ctx.fillText(OUTPUT_LABELS[ni], oPos.x + nodeRadius + 3, oPos.y);
     }
+  };
+
+  // ---------------------------------------------------------------
+  // screenToWorld(sx, sy) — convert screen/canvas coords to world coords
+  // ---------------------------------------------------------------
+  Renderer.prototype.screenToWorld = function (sx, sy) {
+    return {
+      x: (sx - this._offsetX) / this._scale,
+      y: (sy - this._offsetY) / this._scale
+    };
+  };
+
+  // ---------------------------------------------------------------
+  // resetCamera() — reset to default view (fit entire world)
+  // ---------------------------------------------------------------
+  Renderer.prototype.resetCamera = function () {
+    this.camera.x = Config.WORLD_WIDTH / 2;
+    this.camera.y = Config.WORLD_HEIGHT / 2;
+    this.camera.zoom = 1;
+  };
+
+  // ---------------------------------------------------------------
+  // zoomAt(screenX, screenY, factor) — zoom toward a screen point
+  // ---------------------------------------------------------------
+  Renderer.prototype.zoomAt = function (screenX, screenY, factor) {
+    var camera = this.camera;
+    var worldPt = this.screenToWorld(screenX, screenY);
+    var oldZoom = camera.zoom;
+    camera.zoom = max(0.5, min(12, camera.zoom * factor));
+    // Adjust camera so worldPt stays under cursor
+    var canvas = this.worldCanvas;
+    var dpr = this._dpr;
+    var lw = canvas.width / dpr;
+    var lh = canvas.height / dpr;
+    var baseScaleX = lw / Config.WORLD_WIDTH;
+    var baseScaleY = lh / Config.WORLD_HEIGHT;
+    var baseScale = min(baseScaleX, baseScaleY);
+    var newScale = baseScale * camera.zoom;
+    camera.x = worldPt.x - (screenX - lw * 0.5) / newScale;
+    camera.y = worldPt.y - (screenY - lh * 0.5) / newScale;
   };
 
   EcoSim.Renderer = Renderer;

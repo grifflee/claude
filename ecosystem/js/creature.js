@@ -155,6 +155,7 @@
     // Behavioral flags (set each tick by brain outputs)
     this.wantsToEat = false;
     this.wantsToReproduce = false;
+    this.signal = 0; // broadcast signal (-1 to 1), sensed by nearby creatures
   }
 
   // -------------------------------------------------------------------
@@ -201,6 +202,9 @@
 
     //    output[3]: reproduce desire
     this.wantsToReproduce = outputs[3] > 0;
+
+    //    output[4]: signal broadcast (-1 to 1)
+    this.signal = outputs[4];
 
     // 3. Move
     this.x += cos(this.angle) * this.speed;

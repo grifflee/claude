@@ -68,14 +68,12 @@ NN_INPUT_SIZE: 12→16. Inputs 12-15 are brain.lastOutputs from previous tick. U
 ### 4.4 Terrain / Zones -- DONE
 2-3 fertile zones with radii 120-200px, 2-4x food spawn boost. 40% chance food spawns in a zone. Zones drift slowly and bounce off edges. Rendered as faint green radial gradients. Visible on minimap.
 
-### 4.5 Creature Communication (Advanced)
-**File**: `creature.js`, `neural.js`, `world.js`
-**Description**: Add a "signal" output to the neural network — a value that nearby creatures can sense. This enables emergent communication.
-**Implementation**:
-- Add output[4]: signal value (-1 to 1)
-- Add input[16]: nearest creature's signal value
-- Increase NN sizes accordingly
-- Store `creature.signal` each tick
+### 4.5 Creature Communication -- DONE
+- NN_INPUT_SIZE: 16→17, NN_OUTPUT_SIZE: 4→5
+- Output[4] = signal broadcast (-1 to 1)
+- Input[16] = nearest creature's signal
+- Positive signals rendered as yellow rings, negative as purple
+- Backwards-compatible: old saves auto-pad genome arrays
 
 ### 4.6 Improved Genetics / Genome Viewer
 **File**: `ui.js`, `renderer.js`
@@ -114,13 +112,11 @@ Complete rewrite to multi-universe system with auto-save:
 - Auto-save every 3000 ticks with visual indicator
 - Auto-saves current universe before switching to another
 
-### 5.5 Screenshot / GIF Export
-**File**: New functionality in `ui.js`
-**Description**: "Screenshot" button that downloads the current canvas as PNG. Bonus: record last N frames as GIF using a small library.
+### 5.5 Screenshot Export -- DONE
+Press 'p' or click Screenshot button. Downloads canvas as PNG with tick/generation in filename.
 
-### 5.6 Fullscreen Mode
-**File**: `ui.js`
-**Description**: Double-click canvas to go fullscreen. Hide sidebar, maximize canvas.
+### 5.6 Fullscreen Mode -- DONE
+Double-click canvas to toggle fullscreen. Minimap, zoom indicator, and info overlay all visible in fullscreen.
 
 ---
 
@@ -147,8 +143,14 @@ Complete rewrite to multi-universe system with auto-save:
 
 ## Phase 7: Advanced Features (Priority: LOW — stretch goals)
 
-### 7.1 Camera Pan/Zoom
-**Description**: WASD or click-drag to pan, scroll to zoom. Follow-cam on selected creature.
+### 7.1 Camera Pan/Zoom -- DONE
+- Scroll wheel zooms toward cursor (0.5x to 12x range)
+- Right-click drag pans the camera
+- WASD keyboard movement, +/- to zoom, Home to reset
+- Auto-follows selected creature when zoomed in (smooth lerp)
+- 'C' key or Follow button centers camera on selected creature and zooms to 3x
+- Camera viewport shown on minimap when zoomed in
+- Zoom indicator displays in top-left when zoomed
 
 ### 7.2 Multiple Worlds / Islands
 **Description**: Split the world into 2-4 separate islands with occasional migration between them. Creates isolated evolutionary paths that occasionally mix.
@@ -185,11 +187,13 @@ When continuing development:
 ~~5. Phase 4.2 (creature memory)~~ DONE
 ~~6. Phase 5.4 (save/load)~~ DONE
 ~~7. Phase 4.4 (terrain zones)~~ DONE
-8. **NEXT**: Phase 4.5 (creature communication) — signal output/input
-9. Phase 5.1 (lineage tracking) + Phase 5.2 (graph improvements)
-10. Phase 5.5 (screenshot) + Phase 5.6 (fullscreen)
-11. Phase 6 (performance optimization — if needed)
-12. Phase 7 (advanced: camera pan/zoom, sound, evolution timeline)
+~~8. Phase 4.5 (creature communication) — signal output/input~~ DONE
+~~9. Phase 5.5 (screenshot) + Phase 5.6 (fullscreen)~~ DONE
+~~10. Phase 7.1 (camera pan/zoom + follow-cam)~~ DONE
+11. **NEXT**: Phase 4.6 (genome viewer) + Phase 5.1 (lineage tracking)
+12. Phase 5.2 (graph improvements)
+13. Phase 6 (performance optimization — if needed)
+14. Phase 7 (sound, evolution timeline, multi-island)
 
 ---
 

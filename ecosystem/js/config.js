@@ -33,7 +33,7 @@ EcoSim.Config = {
   CREATURE_EAT_RANGE: 10,
 
   // ---- Neural Network ----
-  // Inputs (16):
+  // Inputs (17):
   //   0-1: nearest food dx, dy (normalized)
   //   2:   nearest food distance (normalized 0-1)
   //   3-4: nearest creature dx, dy (normalized)
@@ -42,16 +42,18 @@ EcoSim.Config = {
   //   7:   own energy level (normalized 0-1)
   //   8-9: wall proximity left/right (0-1, 1=touching)
   //   10-11: wall proximity up/down (0-1, 1=touching)
-  //   12-15: previous tick's outputs (recurrent memory)
-  NN_INPUT_SIZE: 16,
+  //   12-15: previous tick's outputs (recurrent memory, first 4)
+  //   16: nearest creature's signal (-1 to 1)
+  NN_INPUT_SIZE: 17,
   NN_HIDDEN1_SIZE: 10,
   NN_HIDDEN2_SIZE: 8,
-  // Outputs (4):
+  // Outputs (5):
   //   0: turn amount (-1 left to 1 right)
   //   1: speed (0 to 1)
   //   2: desire to eat/attack (>0.5 = try)
   //   3: desire to reproduce (>0.5 = try if eligible)
-  NN_OUTPUT_SIZE: 4,
+  //   4: signal broadcast (-1 to 1, sensed by nearby creatures)
+  NN_OUTPUT_SIZE: 5,
 
   // ---- Food ----
   FOOD_SPAWN_RATE: 0.6,       // avg food spawned per tick

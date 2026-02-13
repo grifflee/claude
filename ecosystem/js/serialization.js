@@ -72,14 +72,37 @@
     };
   }
 
+  // Pad a Float32Array with small random values if shorter than target
+  function padF32(arr, targetLen) {
+    if (arr.length >= targetLen) return arr;
+    var result = new Float32Array(targetLen);
+    result.set(arr);
+    for (var i = arr.length; i < targetLen; i++) {
+      result[i] = (Math.random() - 0.5) * 0.2;
+    }
+    return result;
+  }
+
   function deserializeGenome(data) {
+    var w1 = arrayToF32(data.w1);
+    var b1 = arrayToF32(data.b1);
+    var w2 = arrayToF32(data.w2);
+    var b2 = arrayToF32(data.b2);
+    var w3 = arrayToF32(data.w3);
+    var b3 = arrayToF32(data.b3);
+
+    // Backwards compat: pad for expanded NN (16→17 inputs, 4→5 outputs)
+    var expW1 = Config.NN_INPUT_SIZE * Config.NN_HIDDEN1_SIZE;
+    var expW3 = Config.NN_HIDDEN2_SIZE * Config.NN_OUTPUT_SIZE;
+    var expB3 = Config.NN_OUTPUT_SIZE;
+    w1 = padF32(w1, expW1);
+    w3 = padF32(w3, expW3);
+    b3 = padF32(b3, expB3);
+
     return {
-      weights1: arrayToF32(data.w1),
-      biases1:  arrayToF32(data.b1),
-      weights2: arrayToF32(data.w2),
-      biases2:  arrayToF32(data.b2),
-      weights3: arrayToF32(data.w3),
-      biases3:  arrayToF32(data.b3)
+      weights1: w1, biases1: b1,
+      weights2: w2, biases2: b2,
+      weights3: w3, biases3: b3
     };
   }
 
@@ -105,7 +128,8 @@
       kills: c.kills,
       foodEaten: c.foodEaten,
       children: c.children,
-      reproductionCooldown: c.reproductionCooldown
+      reproductionCooldown: c.reproductionCooldown,
+      signal: c.signal || 0
     };
   }
 
@@ -125,6 +149,7 @@
     c.foodEaten = data.foodEaten;
     c.children = data.children;
     c.reproductionCooldown = data.reproductionCooldown;
+    c.signal = data.signal || 0;
     return c;
   }
 
@@ -133,7 +158,7 @@
   // ---------------------------------------------------------------
   Serialization.serialize = function (world) {
     var state = {
-      version: 2,
+      version: 3,
       tick: world.tick,
       totalBirths: world.totalBirths,
       totalDeaths: world.totalDeaths,

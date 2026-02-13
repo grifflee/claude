@@ -12,6 +12,18 @@
     <!-- Main simulation canvas -->
     <div id="world-container">
       <canvas id="world-canvas"></canvas>
+      <!-- Minimap -->
+      <canvas id="minimap" width="160" height="90"></canvas>
+      <!-- Zoom indicator -->
+      <div id="zoom-indicator"></div>
+      <!-- Bottom-left info overlay -->
+      <div id="info-overlay">
+        <span id="overlay-gen">Gen: 0</span>
+        <span class="overlay-sep">|</span>
+        <span id="overlay-pop">Pop: 0</span>
+        <span class="overlay-sep">|</span>
+        <span id="overlay-fps">FPS: 0</span>
+      </div>
     </div>
 
     <!-- Right sidebar -->
@@ -109,8 +121,17 @@
           <div class="button-column">
             <button class="action-btn" id="add-food-btn">Add Food (click)</button>
             <button class="action-btn" id="spawn-btn">Spawn Creature</button>
+            <button class="action-btn" id="screenshot-btn">Screenshot (p)</button>
             <button class="action-btn danger" id="reset-btn">Reset</button>
           </div>
+        </div>
+        <div class="control-group">
+          <label class="control-label">Camera</label>
+          <div class="button-row">
+            <button class="action-btn" id="camera-reset-btn">Reset View</button>
+            <button class="action-btn" id="camera-follow-btn">Follow (c)</button>
+          </div>
+          <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:4px">Scroll=zoom | Right-drag=pan | WASD=move | Dbl-click=fullscreen</div>
         </div>
       </section>
 
@@ -178,18 +199,6 @@
         <div id="creature-details"></div>
       </section>
     </aside>
-
-    <!-- Minimap -->
-    <canvas id="minimap" width="160" height="90"></canvas>
-
-    <!-- Bottom-left info overlay -->
-    <div id="info-overlay">
-      <span id="overlay-gen">Gen: 0</span>
-      <span class="overlay-sep">|</span>
-      <span id="overlay-pop">Pop: 0</span>
-      <span class="overlay-sep">|</span>
-      <span id="overlay-fps">FPS: 0</span>
-    </div>
 
   </div>
 

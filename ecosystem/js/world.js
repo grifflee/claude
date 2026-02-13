@@ -571,8 +571,8 @@
       }
     }
 
-    // Build the 16-element input array
-    var inputs = new Array(16);
+    // Build the 17-element input array
+    var inputs = new Array(17);
 
     // Inputs 0-2: nearest food direction and distance
     if (nearestFood) {
@@ -631,12 +631,15 @@
     inputs[10] = Math.max(0, 1 - cy / WALL_SENSE_DIST);
     inputs[11] = Math.max(0, 1 - (this.height - cy) / WALL_SENSE_DIST);
 
-    // Inputs 12-15: previous tick's neural outputs (recurrent memory)
+    // Inputs 12-15: previous tick's neural outputs (recurrent memory, first 4)
     var prevOut = creature.brain.lastOutputs;
     inputs[12] = prevOut[0];
     inputs[13] = prevOut[1];
     inputs[14] = prevOut[2];
     inputs[15] = prevOut[3];
+
+    // Input 16: nearest creature's signal (-1 to 1)
+    inputs[16] = nearestCreature ? (nearestCreature.signal || 0) : 0;
 
     return inputs;
   };

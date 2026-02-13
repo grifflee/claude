@@ -5,7 +5,7 @@
  * that serves as creature "brains" in the evolutionary ecosystem simulator.
  *
  * Architecture:
- *   Input (12) -> Hidden1 (10, tanh) -> Hidden2 (8, tanh) -> Output (4, tanh)
+ *   Input (17) -> Hidden1 (10, tanh) -> Hidden2 (8, tanh) -> Output (5, tanh)
  */
 (function () {
   'use strict';
@@ -163,7 +163,11 @@
     }
 
     // Return a plain Array for consumer convenience (lightweight copy)
-    return [lastOutputs[0], lastOutputs[1], lastOutputs[2], lastOutputs[3]];
+    var result = new Array(OUTPUT_SIZE);
+    for (i = 0; i < OUTPUT_SIZE; i++) {
+      result[i] = lastOutputs[i];
+    }
+    return result;
   };
 
   // ---------------------------------------------------------------
