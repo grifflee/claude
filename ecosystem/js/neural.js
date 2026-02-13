@@ -162,12 +162,7 @@
       lastOutputs[j] = tanh(sum);
     }
 
-    // Return a plain Array for consumer convenience (lightweight copy)
-    var result = new Array(OUTPUT_SIZE);
-    for (i = 0; i < OUTPUT_SIZE; i++) {
-      result[i] = lastOutputs[i];
-    }
-    return result;
+    return lastOutputs;
   };
 
   // ---------------------------------------------------------------

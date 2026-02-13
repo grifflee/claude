@@ -16,6 +16,8 @@
       <canvas id="minimap" width="160" height="90"></canvas>
       <!-- Zoom indicator -->
       <div id="zoom-indicator"></div>
+      <!-- Event notification banner -->
+      <div id="event-banner"></div>
       <!-- Bottom-left info overlay -->
       <div id="info-overlay">
         <span id="overlay-gen">Gen: 0</span>
@@ -139,7 +141,7 @@
             <button class="action-btn" id="camera-reset-btn">Reset View</button>
             <button class="action-btn" id="camera-follow-btn">Follow (c)</button>
           </div>
-          <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:4px">Scroll=zoom | Right-drag=pan | WASD=move | Dbl-click=fullscreen</div>
+          <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:4px">Scroll=zoom | Drag=pan | WASD=move | Dbl-click=fullscreen</div>
         </div>
         <div class="control-group">
           <label class="control-label">Audio</label>
@@ -187,8 +189,8 @@
           </div>
           <div class="setting-row">
             <label class="setting-label">Food Spawn Rate</label>
-            <input type="range" class="setting-slider" id="slider-food-spawn" min="10" max="400" value="150" step="5">
-            <span class="setting-value" id="val-food-spawn">1.50</span>
+            <input type="range" class="setting-slider" id="slider-food-spawn" min="10" max="1200" value="600" step="10">
+            <span class="setting-value" id="val-food-spawn">6.00</span>
           </div>
           <div class="setting-row">
             <label class="setting-label">Energy Drain</label>

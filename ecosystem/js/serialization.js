@@ -125,6 +125,7 @@
         efficiency: c.bodyGenes.efficiency,
         luminosity: c.bodyGenes.luminosity !== undefined ? c.bodyGenes.luminosity : 0.7
       },
+      islandId: c.islandId || null,
       brain: serializeGenome(c.brain),
       kills: c.kills,
       foodEaten: c.foodEaten,
@@ -147,6 +148,7 @@
     c.angle = data.angle;
     c.energy = data.energy;
     c.age = data.age;
+    c.islandId = data.islandId || null;
     c.kills = data.kills;
     c.foodEaten = data.foodEaten;
     c.children = data.children;
@@ -161,12 +163,13 @@
   // ---------------------------------------------------------------
   Serialization.serialize = function (world) {
     var state = {
-      version: 3,
+      version: 4,
       tick: world.tick,
       totalBirths: world.totalBirths,
       totalDeaths: world.totalDeaths,
       maxGeneration: world.maxGeneration,
       nextId: EcoSim._nextId,
+      islandCount: Config.ISLAND_COUNT,
       creatures: [],
       food: [],
       zones: []
@@ -240,6 +243,31 @@
       world.zones = [];
       for (i = 0; i < state.zones.length; i++) {
         world.zones.push(state.zones[i]);
+      }
+    }
+
+    // Rebuild island structure
+    world._initIslands();
+    world._lastMigrationTick = 0;
+    world._migrationEffects = [];
+
+    // If loaded save has no islandCount or different island config,
+    // assign creatures to islands based on their position
+    if (world.islands.length > 0) {
+      var savedIslandCount = state.islandCount || 1;
+      if (savedIslandCount !== Config.ISLAND_COUNT) {
+        // Reassign all creatures to islands by position
+        for (i = 0; i < world.creatures.length; i++) {
+          var cr = world.creatures[i];
+          var isl = world._getIslandAt(cr.x, cr.y);
+          cr.islandId = isl ? isl.id : world.islands[0].id;
+          // Clamp to island bounds if in the gap
+          if (isl) {
+            var ib = isl.bounds;
+            cr.x = Math.max(ib.x1 + cr.size, Math.min(ib.x2 - cr.size, cr.x));
+            cr.y = Math.max(ib.y1 + cr.size, Math.min(ib.y2 - cr.size, cr.y));
+          }
+        }
       }
     }
 

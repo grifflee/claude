@@ -43,9 +43,13 @@
     this.creatureImportBtn = document.getElementById('creature-import-btn');
     this.creatureImportInput = document.getElementById('creature-import-input');
 
+    this.eventBanner = document.getElementById('event-banner');
+    this._eventBannerTimeout = null;
+
     this.bindEvents();
     this.initSettings();
     this.initUniversePanel();
+    this._initEventListener();
   }
 
   UI.prototype.bindEvents = function () {
@@ -544,7 +548,7 @@
         'Size: ' + creature.size.toFixed(1) + ' | Max Speed: ' + g.maxSpeed.toFixed(1),
         'Food Eaten: ' + creature.foodEaten + ' | Kills: ' + creature.kills,
         'Children: ' + creature.children + (creature.parentId ? ' | Parent: #' + creature.parentId : ''),
-        'Species: ' + creature.speciesId,
+        'Species: ' + creature.speciesId + (creature.islandId ? ' | Island: ' + creature.islandId.charAt(0).toUpperCase() + creature.islandId.slice(1) : ''),
         'Efficiency: ' + g.efficiency.toFixed(2) + ' | Aggression: ' + g.aggression.toFixed(2),
         'Signal: ' + (creature.signal || 0).toFixed(2)
       ];
@@ -977,6 +981,42 @@
         valEl.textContent = s.toDisplay(raw);
       });
     });
+  };
+
+  // ---------------------------------------------------------------
+  // World Event notification banner
+  // ---------------------------------------------------------------
+  UI.prototype._initEventListener = function () {
+    var self = this;
+    Events.on('world:event', function (data) {
+      self._showEventBanner(data.type, data.label);
+    });
+    Events.on('creature:migrate', function (data) {
+      var toName = data.toIsland.charAt(0).toUpperCase() + data.toIsland.slice(1);
+      self._showEventBanner('migration', 'Migration to ' + toName);
+    });
+  };
+
+  UI.prototype._showEventBanner = function (type, label) {
+    var banner = this.eventBanner;
+    if (!banner) return;
+
+    // Clear previous timeout
+    clearTimeout(this._eventBannerTimeout);
+
+    // Remove all event type classes
+    banner.className = '';
+    banner.textContent = label;
+    banner.classList.add('event-' + type);
+
+    // Force reflow for transition restart
+    void banner.offsetWidth;
+    banner.classList.add('visible');
+
+    var self = this;
+    this._eventBannerTimeout = setTimeout(function () {
+      banner.classList.remove('visible');
+    }, 3000);
   };
 
   EcoSim.UI = UI;

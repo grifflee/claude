@@ -24,6 +24,9 @@
   var WORLD_WIDTH   = Config.WORLD_WIDTH;
   var WORLD_HEIGHT  = Config.WORLD_HEIGHT;
   var GRID_CELL_SIZE = Config.GRID_CELL_SIZE;
+  var GRID_COLS = Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE);
+  var GRID_ROWS = Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE);
+  var GRID_TOTAL = GRID_COLS * GRID_ROWS;
 
   var INITIAL_CREATURE_COUNT = Config.INITIAL_CREATURE_COUNT;
   var MAX_CREATURES           = Config.MAX_CREATURES;
@@ -104,14 +107,21 @@
     this.totalDeaths = 0;
     this.maxGeneration = 0;
 
-    this.spatialGrid = {};
-    this.foodGrid = {};
+    this.spatialGrid = new Array(GRID_TOTAL);
+    this.foodGrid = new Array(GRID_TOTAL);
+    this._foodGridDirty = true;
 
     this.width = WORLD_WIDTH;
     this.height = WORLD_HEIGHT;
 
     this.selectedCreature = null;
     this.paused = false;
+
+    // Island system (must init before zones, which need island bounds)
+    this.islands = [];
+    this._lastMigrationTick = 0;
+    this._migrationEffects = [];
+    this._initIslands();
 
     // Fertile zones — areas where food spawns faster
     this.zones = [];
@@ -130,15 +140,39 @@
   World.prototype._initZones = function () {
     var count = 5 + Math.floor(Math.random() * 4); // 5-8 zones
     this.zones = [];
-    for (var i = 0; i < count; i++) {
-      this.zones.push({
-        x: 150 + Math.random() * (this.width - 300),
-        y: 150 + Math.random() * (this.height - 300),
-        radius: 200 + Math.random() * 150,
-        spawnMultiplier: 2 + Math.random() * 2, // 2-4x food spawn boost
-        vx: (Math.random() - 0.5) * 0.02,       // very slow drift
-        vy: (Math.random() - 0.5) * 0.02
-      });
+
+    if (this.islands.length > 0) {
+      // Distribute zones across islands proportionally
+      var perIsland = Math.floor(count / this.islands.length);
+      var extra = count - perIsland * this.islands.length;
+      for (var ii = 0; ii < this.islands.length; ii++) {
+        var isl = this.islands[ii];
+        var b = isl.bounds;
+        var zCount = perIsland + (ii < extra ? 1 : 0);
+        for (var zi = 0; zi < zCount; zi++) {
+          var rad = 200 + Math.random() * 150;
+          this.zones.push({
+            x: (b.x1 + rad) + Math.random() * (b.x2 - b.x1 - rad * 2),
+            y: (b.y1 + rad) + Math.random() * (b.y2 - b.y1 - rad * 2),
+            radius: rad,
+            spawnMultiplier: 2 + Math.random() * 2,
+            vx: (Math.random() - 0.5) * 0.02,
+            vy: (Math.random() - 0.5) * 0.02,
+            islandId: isl.id
+          });
+        }
+      }
+    } else {
+      for (var i = 0; i < count; i++) {
+        this.zones.push({
+          x: 150 + Math.random() * (this.width - 300),
+          y: 150 + Math.random() * (this.height - 300),
+          radius: 200 + Math.random() * 150,
+          spawnMultiplier: 2 + Math.random() * 2,
+          vx: (Math.random() - 0.5) * 0.02,
+          vy: (Math.random() - 0.5) * 0.02
+        });
+      }
     }
   };
 
@@ -149,6 +183,188 @@
     this.nextEventTick = 800 + Math.floor(Math.random() * 1500);
     this.activeEvents = [];
     this.mutationStormTicks = 0;
+  };
+
+  // ---------------------------------------------------------------
+  // _initIslands() -- create island regions based on ISLAND_COUNT
+  // ---------------------------------------------------------------
+  World.prototype._initIslands = function () {
+    var count = Config.ISLAND_COUNT;
+    var gap = Config.ISLAND_GAP;
+    this.islands = [];
+
+    if (count <= 1) return; // single island = no-op, full world
+
+    if (count === 2) {
+      // Vertical split — two islands side by side
+      var halfW = (this.width - gap) / 2;
+      this.islands.push({
+        id: 'west',
+        bounds: { x1: 0, y1: 0, x2: halfW, y2: this.height }
+      });
+      this.islands.push({
+        id: 'east',
+        bounds: { x1: halfW + gap, y1: 0, x2: this.width, y2: this.height }
+      });
+    } else if (count >= 4) {
+      // 2x2 grid
+      var qW = (this.width - gap) / 2;
+      var qH = (this.height - gap) / 2;
+      this.islands.push({
+        id: 'northwest',
+        bounds: { x1: 0, y1: 0, x2: qW, y2: qH }
+      });
+      this.islands.push({
+        id: 'northeast',
+        bounds: { x1: qW + gap, y1: 0, x2: this.width, y2: qH }
+      });
+      this.islands.push({
+        id: 'southwest',
+        bounds: { x1: 0, y1: qH + gap, x2: qW, y2: this.height }
+      });
+      this.islands.push({
+        id: 'southeast',
+        bounds: { x1: qW + gap, y1: qH + gap, x2: this.width, y2: this.height }
+      });
+    }
+  };
+
+  // ---------------------------------------------------------------
+  // _getIslandAt(x, y) -- returns island object for a position
+  // ---------------------------------------------------------------
+  World.prototype._getIslandAt = function (x, y) {
+    var islands = this.islands;
+    for (var i = 0; i < islands.length; i++) {
+      var b = islands[i].bounds;
+      if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) {
+        return islands[i];
+      }
+    }
+    // Fallback: return nearest island (for gap positions)
+    var best = null;
+    var bestDist = Infinity;
+    for (var j = 0; j < islands.length; j++) {
+      var ib = islands[j].bounds;
+      var cx = clamp(x, ib.x1, ib.x2);
+      var cy = clamp(y, ib.y1, ib.y2);
+      var d = distSq(x, y, cx, cy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = islands[j];
+      }
+    }
+    return best;
+  };
+
+  // ---------------------------------------------------------------
+  // _getIslandById(id) -- returns island object by id
+  // ---------------------------------------------------------------
+  World.prototype._getIslandById = function (id) {
+    var islands = this.islands;
+    for (var i = 0; i < islands.length; i++) {
+      if (islands[i].id === id) return islands[i];
+    }
+    return null;
+  };
+
+  // ---------------------------------------------------------------
+  // _randomPointInIsland(island) -- random position within island
+  // ---------------------------------------------------------------
+  World.prototype._randomPointInIsland = function (island) {
+    var b = island.bounds;
+    var margin = 20;
+    return {
+      x: (b.x1 + margin) + Math.random() * (b.x2 - b.x1 - margin * 2),
+      y: (b.y1 + margin) + Math.random() * (b.y2 - b.y1 - margin * 2)
+    };
+  };
+
+  // ---------------------------------------------------------------
+  // _clampToIsland(creature) -- enforce island boundaries
+  // ---------------------------------------------------------------
+  World.prototype._clampToIsland = function (creature) {
+    var island = this._getIslandById(creature.islandId);
+    if (!island) return;
+    var b = island.bounds;
+    var s = creature.size;
+    var bounced = false;
+
+    if (creature.x < b.x1 + s) {
+      creature.x = b.x1 + s;
+      creature.angle = Math.PI - creature.angle;
+      bounced = true;
+    } else if (creature.x > b.x2 - s) {
+      creature.x = b.x2 - s;
+      creature.angle = Math.PI - creature.angle;
+      bounced = true;
+    }
+
+    if (creature.y < b.y1 + s) {
+      creature.y = b.y1 + s;
+      creature.angle = -creature.angle;
+      bounced = true;
+    } else if (creature.y > b.y2 - s) {
+      creature.y = b.y2 - s;
+      creature.angle = -creature.angle;
+      bounced = true;
+    }
+
+    if (bounced) {
+      creature.angle = ((creature.angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    }
+  };
+
+  // ---------------------------------------------------------------
+  // _checkMigration() -- rare cross-island migration events
+  // ---------------------------------------------------------------
+  World.prototype._checkMigration = function () {
+    if (this.islands.length < 2) return;
+    if (this.tick - this._lastMigrationTick < Config.MIGRATION_MIN_INTERVAL) return;
+    if (Math.random() >= Config.MIGRATION_CHANCE) return;
+
+    var creatures = this.creatures;
+    if (creatures.length === 0) return;
+
+    // Pick random living creature
+    var candidate = creatures[Math.floor(Math.random() * creatures.length)];
+    if (!candidate.alive) return;
+
+    var fromIslandId = candidate.islandId;
+
+    // Pick a different island
+    var otherIslands = [];
+    for (var i = 0; i < this.islands.length; i++) {
+      if (this.islands[i].id !== fromIslandId) {
+        otherIslands.push(this.islands[i]);
+      }
+    }
+    if (otherIslands.length === 0) return;
+
+    var targetIsland = otherIslands[Math.floor(Math.random() * otherIslands.length)];
+    var oldX = candidate.x;
+    var oldY = candidate.y;
+
+    // Teleport creature to target island
+    var newPos = this._randomPointInIsland(targetIsland);
+    candidate.x = newPos.x;
+    candidate.y = newPos.y;
+    candidate.islandId = targetIsland.id;
+
+    this._lastMigrationTick = this.tick;
+
+    // Store migration effect for renderer
+    this._migrationEffects.push({
+      fromX: oldX, fromY: oldY,
+      toX: newPos.x, toY: newPos.y,
+      hue: candidate.bodyGenes.hue,
+      ticksLeft: 40, maxTicks: 40
+    });
+
+    Events.emit('creature:migrate', {
+      creature: candidate,
+      fromIsland: fromIslandId,
+      toIsland: targetIsland.id
+    });
   };
 
   // ---------------------------------------------------------------
@@ -177,6 +393,7 @@
       // Drop meat at death location
       if (Math.random() < Config.MEAT_SPAWN_CHANCE) {
         self.food.push(createFood(c.x, c.y, 'meat'));
+        self._foodGridDirty = true;
       }
       // Add to dying creatures for fade-out animation
       self.dyingCreatures.push({
@@ -198,8 +415,9 @@
     this.food = [];
     this.particles = [];
     this.dyingCreatures = [];
-    this.spatialGrid = {};
-    this.foodGrid = {};
+    this.spatialGrid = new Array(GRID_TOTAL);
+    this.foodGrid = new Array(GRID_TOTAL);
+    this._foodGridDirty = true;
 
     // Reset counters
     this.tick = 0;
@@ -207,21 +425,42 @@
     this.totalDeaths = 0;
     this.maxGeneration = 0;
     this.selectedCreature = null;
+    this._lastMigrationTick = 0;
+    this._migrationEffects = [];
+    this._initIslands();
     this._initZones();
     this._initEvents();
 
-    // Spawn initial creatures at random positions
-    for (i = 0; i < INITIAL_CREATURE_COUNT; i++) {
-      this._spawnRandomCreature();
+    // Spawn initial creatures distributed across islands
+    if (this.islands.length > 0) {
+      var perIsland = Math.floor(INITIAL_CREATURE_COUNT / this.islands.length);
+      for (var ii = 0; ii < this.islands.length; ii++) {
+        for (i = 0; i < perIsland; i++) {
+          this._spawnRandomCreature(this.islands[ii].id);
+        }
+      }
+    } else {
+      for (i = 0; i < INITIAL_CREATURE_COUNT; i++) {
+        this._spawnRandomCreature();
+      }
     }
 
-    // Spawn initial food: half of max count
+    // Spawn initial food: half of max count, distributed across islands
     var initialFood = Math.floor(FOOD_MAX_COUNT / 2);
     for (i = 0; i < initialFood; i++) {
-      var fx = 20 + Math.random() * (this.width - 40);
-      var fy = 20 + Math.random() * (this.height - 40);
+      var fx, fy;
+      if (this.islands.length > 0) {
+        var randIsland = this.islands[Math.floor(Math.random() * this.islands.length)];
+        var fPt = this._randomPointInIsland(randIsland);
+        fx = fPt.x;
+        fy = fPt.y;
+      } else {
+        fx = 20 + Math.random() * (this.width - 40);
+        fy = 20 + Math.random() * (this.height - 40);
+      }
       this.food.push(createFood(fx, fy));
     }
+    this._foodGridDirty = true;
 
     return this;
   };
@@ -229,13 +468,29 @@
   // ---------------------------------------------------------------
   // _spawnRandomCreature() -- internal helper
   // ---------------------------------------------------------------
-  World.prototype._spawnRandomCreature = function () {
-    var x = 20 + Math.random() * (this.width - 40);
-    var y = 20 + Math.random() * (this.height - 40);
+  World.prototype._spawnRandomCreature = function (islandId) {
+    var x, y, assignedIsland;
+
+    if (this.islands.length > 0) {
+      if (islandId) {
+        assignedIsland = this._getIslandById(islandId);
+      }
+      if (!assignedIsland) {
+        assignedIsland = this.islands[Math.floor(Math.random() * this.islands.length)];
+      }
+      var pt = this._randomPointInIsland(assignedIsland);
+      x = pt.x;
+      y = pt.y;
+    } else {
+      x = 20 + Math.random() * (this.width - 40);
+      y = 20 + Math.random() * (this.height - 40);
+    }
+
     var creature = new Creature({
       x: x,
       y: y,
-      angle: Math.random() * Math.PI * 2
+      angle: Math.random() * Math.PI * 2,
+      islandId: assignedIsland ? assignedIsland.id : null
     });
     this.creatures.push(creature);
     return creature;
@@ -292,6 +547,11 @@
       // Let the creature's neural network process inputs and update state
       creature.update(inputs);
 
+      // Enforce island boundaries (tighter than world edges)
+      if (creature.islandId && this.islands.length > 0) {
+        this._clampToIsland(creature);
+      }
+
       // Check eating -- find nearby food
       this._checkEating(creature);
 
@@ -340,11 +600,21 @@
       var z = this.zones[i];
       z.x += z.vx;
       z.y += z.vy;
-      // Bounce off edges
-      if (z.x < z.radius) { z.x = z.radius; z.vx = Math.abs(z.vx); }
-      if (z.x > this.width - z.radius) { z.x = this.width - z.radius; z.vx = -Math.abs(z.vx); }
-      if (z.y < z.radius) { z.y = z.radius; z.vy = Math.abs(z.vy); }
-      if (z.y > this.height - z.radius) { z.y = this.height - z.radius; z.vy = -Math.abs(z.vy); }
+      // Bounce off island bounds (or world edges if no island)
+      var zBoundsLeft = 0, zBoundsRight = this.width, zBoundsTop = 0, zBoundsBottom = this.height;
+      if (z.islandId && this.islands.length > 0) {
+        var zIsl = this._getIslandById(z.islandId);
+        if (zIsl) {
+          zBoundsLeft = zIsl.bounds.x1;
+          zBoundsRight = zIsl.bounds.x2;
+          zBoundsTop = zIsl.bounds.y1;
+          zBoundsBottom = zIsl.bounds.y2;
+        }
+      }
+      if (z.x < zBoundsLeft + z.radius) { z.x = zBoundsLeft + z.radius; z.vx = Math.abs(z.vx); }
+      if (z.x > zBoundsRight - z.radius) { z.x = zBoundsRight - z.radius; z.vx = -Math.abs(z.vx); }
+      if (z.y < zBoundsTop + z.radius) { z.y = zBoundsTop + z.radius; z.vy = Math.abs(z.vy); }
+      if (z.y > zBoundsBottom - z.radius) { z.y = zBoundsBottom - z.radius; z.vy = -Math.abs(z.vy); }
     }
 
     // Update dying creatures
@@ -358,8 +628,32 @@
     // Update particles
     this._updateParticles();
 
-    // Enforce minimum population (scaled for 4800x2700 world)
-    if (creatures.length < 30) {
+    // Check for island migration events
+    this._checkMigration();
+
+    // Update migration visual effects
+    for (i = this._migrationEffects.length - 1; i >= 0; i--) {
+      this._migrationEffects[i].ticksLeft--;
+      if (this._migrationEffects[i].ticksLeft <= 0) {
+        this._migrationEffects.splice(i, 1);
+      }
+    }
+
+    // Enforce minimum population — per-island if islands exist
+    if (this.islands.length > 0) {
+      for (i = 0; i < this.islands.length; i++) {
+        var isl = this.islands[i];
+        var islCount = 0;
+        for (var ci = 0; ci < creatures.length; ci++) {
+          if (creatures[ci].islandId === isl.id) islCount++;
+        }
+        if (islCount < 15) {
+          for (var si = 0; si < 25; si++) {
+            this._spawnRandomCreature(isl.id);
+          }
+        }
+      }
+    } else if (creatures.length < 30) {
       for (i = 0; i < 50; i++) {
         this._spawnRandomCreature();
       }
@@ -393,6 +687,7 @@
       var idx = this.food.indexOf(closest);
       if (idx !== -1) {
         this.food.splice(idx, 1);
+        this._foodGridDirty = true;
       }
     }
   };
@@ -462,6 +757,10 @@
     }
 
     if (child) {
+      // Offspring inherits parent's island
+      if (creature.islandId) {
+        child.islandId = creature.islandId;
+      }
       this.creatures.push(child);
       if (child.generation > this.maxGeneration) {
         this.maxGeneration = child.generation;
@@ -473,32 +772,56 @@
   // buildSpatialGrid() -- rebuild the spatial hash for creatures and food
   // ---------------------------------------------------------------
   World.prototype.buildSpatialGrid = function () {
-    var grid = {};
-    var foodGrid = {};
-    var i, creature, f, key;
+    var grid = this.spatialGrid;
+    var i, creature, col, row, idx;
+
+    // Clear creature grid
+    for (i = 0; i < GRID_TOTAL; i++) {
+      grid[i] = null;
+    }
 
     // Index creatures
     for (i = 0; i < this.creatures.length; i++) {
       creature = this.creatures[i];
-      key = Math.floor(creature.x / GRID_CELL_SIZE) + '_' + Math.floor(creature.y / GRID_CELL_SIZE);
-      if (!grid[key]) {
-        grid[key] = [];
+      col = (creature.x / GRID_CELL_SIZE) | 0;
+      row = (creature.y / GRID_CELL_SIZE) | 0;
+      // Clamp to grid bounds
+      if (col < 0) col = 0;
+      if (col >= GRID_COLS) col = GRID_COLS - 1;
+      if (row < 0) row = 0;
+      if (row >= GRID_ROWS) row = GRID_ROWS - 1;
+      idx = col * GRID_ROWS + row;
+      if (!grid[idx]) {
+        grid[idx] = [creature];
+      } else {
+        grid[idx].push(creature);
       }
-      grid[key].push(creature);
     }
 
-    // Index food
-    for (i = 0; i < this.food.length; i++) {
-      f = this.food[i];
-      key = Math.floor(f.x / GRID_CELL_SIZE) + '_' + Math.floor(f.y / GRID_CELL_SIZE);
-      if (!foodGrid[key]) {
-        foodGrid[key] = [];
+    // Only rebuild food grid when dirty
+    if (this._foodGridDirty) {
+      var foodGrid = this.foodGrid;
+      var f;
+      for (i = 0; i < GRID_TOTAL; i++) {
+        foodGrid[i] = null;
       }
-      foodGrid[key].push(f);
+      for (i = 0; i < this.food.length; i++) {
+        f = this.food[i];
+        col = (f.x / GRID_CELL_SIZE) | 0;
+        row = (f.y / GRID_CELL_SIZE) | 0;
+        if (col < 0) col = 0;
+        if (col >= GRID_COLS) col = GRID_COLS - 1;
+        if (row < 0) row = 0;
+        if (row >= GRID_ROWS) row = GRID_ROWS - 1;
+        idx = col * GRID_ROWS + row;
+        if (!foodGrid[idx]) {
+          foodGrid[idx] = [f];
+        } else {
+          foodGrid[idx].push(f);
+        }
+      }
+      this._foodGridDirty = false;
     }
-
-    this.spatialGrid = grid;
-    this.foodGrid = foodGrid;
   };
 
   // ---------------------------------------------------------------
@@ -510,15 +833,22 @@
     var grid = this.spatialGrid;
 
     var cellRange = Math.ceil(range / GRID_CELL_SIZE);
-    var cx = Math.floor(x / GRID_CELL_SIZE);
-    var cy = Math.floor(y / GRID_CELL_SIZE);
+    var cx = (x / GRID_CELL_SIZE) | 0;
+    var cy = (y / GRID_CELL_SIZE) | 0;
 
-    var gx, gy, key, cell, i, creature, d;
+    var gx, gy, idx, cell, i, creature, d;
+    var minGx = cx - cellRange;
+    var maxGx = cx + cellRange;
+    var minGy = cy - cellRange;
+    var maxGy = cy + cellRange;
+    if (minGx < 0) minGx = 0;
+    if (maxGx >= GRID_COLS) maxGx = GRID_COLS - 1;
+    if (minGy < 0) minGy = 0;
+    if (maxGy >= GRID_ROWS) maxGy = GRID_ROWS - 1;
 
-    for (gx = cx - cellRange; gx <= cx + cellRange; gx++) {
-      for (gy = cy - cellRange; gy <= cy + cellRange; gy++) {
-        key = gx + '_' + gy;
-        cell = grid[key];
+    for (gx = minGx; gx <= maxGx; gx++) {
+      for (gy = minGy; gy <= maxGy; gy++) {
+        cell = grid[gx * GRID_ROWS + gy];
         if (!cell) continue;
         for (i = 0; i < cell.length; i++) {
           creature = cell[i];
@@ -542,15 +872,22 @@
     var grid = this.foodGrid;
 
     var cellRange = Math.ceil(range / GRID_CELL_SIZE);
-    var cx = Math.floor(x / GRID_CELL_SIZE);
-    var cy = Math.floor(y / GRID_CELL_SIZE);
+    var cx = (x / GRID_CELL_SIZE) | 0;
+    var cy = (y / GRID_CELL_SIZE) | 0;
 
-    var gx, gy, key, cell, i, f, d;
+    var gx, gy, cell, i, f, d;
+    var minGx = cx - cellRange;
+    var maxGx = cx + cellRange;
+    var minGy = cy - cellRange;
+    var maxGy = cy + cellRange;
+    if (minGx < 0) minGx = 0;
+    if (maxGx >= GRID_COLS) maxGx = GRID_COLS - 1;
+    if (minGy < 0) minGy = 0;
+    if (maxGy >= GRID_ROWS) maxGy = GRID_ROWS - 1;
 
-    for (gx = cx - cellRange; gx <= cx + cellRange; gx++) {
-      for (gy = cy - cellRange; gy <= cy + cellRange; gy++) {
-        key = gx + '_' + gy;
-        cell = grid[key];
+    for (gx = minGx; gx <= maxGx; gx++) {
+      for (gy = minGy; gy <= maxGy; gy++) {
+        cell = grid[gx * GRID_ROWS + gy];
         if (!cell) continue;
         for (i = 0; i < cell.length; i++) {
           f = cell[i];
@@ -656,12 +993,23 @@
 
     // Inputs 8-9: wall proximity X (left, right)
     // 1.0 = within ~0px of wall, 0.0 = 50px or more away
-    inputs[8] = Math.max(0, 1 - cx / WALL_SENSE_DIST);
-    inputs[9] = Math.max(0, 1 - (this.width - cx) / WALL_SENSE_DIST);
+    // Use island bounds if creature has an island assignment
+    var wallLeft = 0, wallRight = this.width, wallTop = 0, wallBottom = this.height;
+    if (creature.islandId && this.islands.length > 0) {
+      var cIsland = this._getIslandById(creature.islandId);
+      if (cIsland) {
+        wallLeft = cIsland.bounds.x1;
+        wallRight = cIsland.bounds.x2;
+        wallTop = cIsland.bounds.y1;
+        wallBottom = cIsland.bounds.y2;
+      }
+    }
+    inputs[8] = Math.max(0, 1 - (cx - wallLeft) / WALL_SENSE_DIST);
+    inputs[9] = Math.max(0, 1 - (wallRight - cx) / WALL_SENSE_DIST);
 
     // Inputs 10-11: wall proximity Y (top, bottom)
-    inputs[10] = Math.max(0, 1 - cy / WALL_SENSE_DIST);
-    inputs[11] = Math.max(0, 1 - (this.height - cy) / WALL_SENSE_DIST);
+    inputs[10] = Math.max(0, 1 - (cy - wallTop) / WALL_SENSE_DIST);
+    inputs[11] = Math.max(0, 1 - (wallBottom - cy) / WALL_SENSE_DIST);
 
     // Inputs 12-15: previous tick's neural outputs (recurrent memory, first 4)
     var prevOut = creature.brain.lastOutputs;
@@ -693,6 +1041,17 @@
     if (Math.random() >= spawnRate) return;
 
     var x, y;
+    var hasIslands = this.islands.length > 0;
+
+    // Helper: clamp food position to an island's bounds
+    var self = this;
+    function clampToIslandBounds(px, py, island) {
+      var b = island.bounds;
+      return {
+        x: clamp(px, b.x1 + 20, b.x2 - 20),
+        y: clamp(py, b.y1 + 20, b.y2 - 20)
+      };
+    }
 
     // Zone-biased spawning: 40% chance to spawn inside a fertile zone
     if (this.zones.length > 0 && Math.random() < 0.4) {
@@ -701,9 +1060,19 @@
       var zDist = Math.random() * zone.radius;
       x = zone.x + Math.cos(zAngle) * zDist;
       y = zone.y + Math.sin(zAngle) * zDist;
-      x = clamp(x, 20, this.width - 20);
-      y = clamp(y, 20, this.height - 20);
+      if (hasIslands) {
+        var zIsland = self._getIslandAt(zone.x, zone.y);
+        if (zIsland) {
+          var zClamped = clampToIslandBounds(x, y, zIsland);
+          x = zClamped.x;
+          y = zClamped.y;
+        }
+      } else {
+        x = clamp(x, 20, this.width - 20);
+        y = clamp(y, 20, this.height - 20);
+      }
       this.food.push(createFood(x, y));
+      this._foodGridDirty = true;
       return;
     }
 
@@ -714,16 +1083,32 @@
       var dist = Math.random() * FOOD_CLUSTER_RADIUS;
       x = anchor.x + Math.cos(angle) * dist;
       y = anchor.y + Math.sin(angle) * dist;
-      // Clamp to world bounds with margin
-      x = clamp(x, 20, this.width - 20);
-      y = clamp(y, 20, this.height - 20);
+      if (hasIslands) {
+        var aIsland = self._getIslandAt(anchor.x, anchor.y);
+        if (aIsland) {
+          var aClamped = clampToIslandBounds(x, y, aIsland);
+          x = aClamped.x;
+          y = aClamped.y;
+        }
+      } else {
+        x = clamp(x, 20, this.width - 20);
+        y = clamp(y, 20, this.height - 20);
+      }
     } else {
-      // Random position with margin
-      x = 20 + Math.random() * (this.width - 40);
-      y = 20 + Math.random() * (this.height - 40);
+      // Random position — within a random island if islands exist
+      if (hasIslands) {
+        var randIsland = this.islands[Math.floor(Math.random() * this.islands.length)];
+        var pt = this._randomPointInIsland(randIsland);
+        x = pt.x;
+        y = pt.y;
+      } else {
+        x = 20 + Math.random() * (this.width - 40);
+        y = 20 + Math.random() * (this.height - 40);
+      }
     }
 
     this.food.push(createFood(x, y));
+    this._foodGridDirty = true;
   };
 
   // ---------------------------------------------------------------
@@ -735,6 +1120,7 @@
       clamp(y, 0, this.height)
     );
     this.food.push(f);
+    this._foodGridDirty = true;
     Events.emit('food:add', { food: f });
     return f;
   };
@@ -743,10 +1129,14 @@
   // addCreature(x, y) -- add a random creature at specific position
   // ---------------------------------------------------------------
   World.prototype.addCreature = function (x, y) {
+    var cx = clamp(x, 0, this.width);
+    var cy = clamp(y, 0, this.height);
+    var island = this.islands.length > 0 ? this._getIslandAt(cx, cy) : null;
     var creature = new Creature({
-      x: clamp(x, 0, this.width),
-      y: clamp(y, 0, this.height),
-      angle: Math.random() * Math.PI * 2
+      x: cx,
+      y: cy,
+      angle: Math.random() * Math.PI * 2,
+      islandId: island ? island.id : null
     });
     this.creatures.push(creature);
     return creature;
@@ -1052,21 +1442,39 @@
   // _triggerWorldEvent(type) -- execute a world event
   // ---------------------------------------------------------------
   World.prototype._triggerWorldEvent = function (type) {
-    var x = 200 + Math.random() * (this.width - 400);
-    var y = 200 + Math.random() * (this.height - 400);
+    var x, y;
+    var eventIsland = null;
+    if (this.islands.length > 0) {
+      eventIsland = this.islands[Math.floor(Math.random() * this.islands.length)];
+      var eb = eventIsland.bounds;
+      x = (eb.x1 + 200) + Math.random() * (eb.x2 - eb.x1 - 400);
+      y = (eb.y1 + 200) + Math.random() * (eb.y2 - eb.y1 - 400);
+    } else {
+      x = 200 + Math.random() * (this.width - 400);
+      y = 200 + Math.random() * (this.height - 400);
+    }
     var i, a, d, fx, fy;
 
     switch (type) {
       case 'bloom':
         var bloomRadius = Config.EVENT_BLOOM_RADIUS;
         var bloomCount = Config.EVENT_BLOOM_FOOD_COUNT;
+        var bloomMinX = 20, bloomMaxX = this.width - 20;
+        var bloomMinY = 20, bloomMaxY = this.height - 20;
+        if (eventIsland) {
+          bloomMinX = eventIsland.bounds.x1 + 20;
+          bloomMaxX = eventIsland.bounds.x2 - 20;
+          bloomMinY = eventIsland.bounds.y1 + 20;
+          bloomMaxY = eventIsland.bounds.y2 - 20;
+        }
         for (i = 0; i < bloomCount; i++) {
           a = Math.random() * Math.PI * 2;
           d = Math.random() * bloomRadius;
-          fx = clamp(x + Math.cos(a) * d, 20, this.width - 20);
-          fy = clamp(y + Math.sin(a) * d, 20, this.height - 20);
+          fx = clamp(x + Math.cos(a) * d, bloomMinX, bloomMaxX);
+          fy = clamp(y + Math.sin(a) * d, bloomMinY, bloomMaxY);
           this.food.push(createFood(fx, fy));
         }
+        this._foodGridDirty = true;
         this.activeEvents.push({
           type: 'bloom', x: x, y: y, radius: bloomRadius,
           ticksLeft: 120, maxTicks: 120
@@ -1100,7 +1508,8 @@
           x: x, y: y,
           radius: Config.EVENT_METEOR_ZONE_RADIUS,
           spawnMultiplier: 3 + Math.random() * 2,
-          vx: 0, vy: 0
+          vx: 0, vy: 0,
+          islandId: eventIsland ? eventIsland.id : undefined
         });
         this.activeEvents.push({
           type: 'meteor', x: x, y: y, radius: meteorRadius,
@@ -1128,25 +1537,19 @@
   World.prototype._applyActiveEvents = function () {
     var events = this.activeEvents;
     var creatures = this.creatures;
-    var i, j, evt, c, dx, dy, dSq;
+    var i, j, evt, c;
 
     for (i = 0; i < events.length; i++) {
       evt = events[i];
       if (evt.type === 'plague') {
-        var rSq = evt.radius * evt.radius;
-        for (j = 0; j < creatures.length; j++) {
-          c = creatures[j];
+        var nearby = this.getNearbyCreatures(evt.x, evt.y, evt.radius);
+        for (j = 0; j < nearby.length; j++) {
+          c = nearby[j];
           if (!c.alive) continue;
-          dx = c.x - evt.x;
-          dy = c.y - evt.y;
-          dSq = dx * dx + dy * dy;
-          if (dSq < rSq) {
-            // High-efficiency creatures resist plague better
-            var resistance = c.bodyGenes.efficiency; // 0.5-1.5
-            var damage = Config.EVENT_PLAGUE_DAMAGE * (1.5 - resistance);
-            if (damage > 0) {
-              c.energy -= damage;
-            }
+          var resistance = c.bodyGenes.efficiency;
+          var damage = Config.EVENT_PLAGUE_DAMAGE * (1.5 - resistance);
+          if (damage > 0) {
+            c.energy -= damage;
           }
         }
       }

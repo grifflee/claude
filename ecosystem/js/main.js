@@ -62,8 +62,12 @@
                 var ticksThisFrame = EcoSim.Config.TICKS_PER_FRAME;
 
                 if (!world.paused && ticksThisFrame > 0) {
-                    for (var i = 0; i < ticksThisFrame; i++) {
+                    var simBudget = EcoSim.Config.SIM_BUDGET_MS;
+                    var simStart = performance.now();
+                    var ticksDone = 0;
+                    while (ticksDone < ticksThisFrame && (performance.now() - simStart) < simBudget) {
                         world.update();
+                        ticksDone++;
                     }
                     // Auto-save check
                     if (EcoSim.Serialization && EcoSim.Serialization.checkAutoSave(world)) {

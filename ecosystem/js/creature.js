@@ -150,6 +150,9 @@
     this.children = 0;
     this.childIds = [];
 
+    // Island assignment (set by World when islands are active)
+    this.islandId = options.islandId || null;
+
     // Rendering / UI state
     this.trailPositions = [];
     this.lastAction = 'idle';
@@ -532,6 +535,7 @@
       foodEaten: this.foodEaten,
       children: this.children,
       childIds: this.childIds,
+      islandId: this.islandId,
       lastAction: this.lastAction,
       bodyGenes: copyBodyGenes(this.bodyGenes),
       brainComplexity: this.brain.getComplexity ? this.brain.getComplexity() : 0,

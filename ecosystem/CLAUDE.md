@@ -5,7 +5,7 @@ EcoSim is a fully interactive, browser-based artificial life simulation where di
 
 **Created**: Feb 2026
 **Tech**: Vanilla JS, HTML5 Canvas, no frameworks or build tools
-**Total**: ~7,400 lines across 13 files (v3.0 with alien bioluminescent visual overhaul)
+**Total**: ~9,000 lines across 13 files (v3.3 with island system)
 
 ## Architecture
 
@@ -79,12 +79,13 @@ ui.js ← main.js
 ### World Simulation (world.js)
 - **Key class**: `EcoSim.World`
 - **Spatial partitioning**: Hash grid with 50px cells for O(1) neighbor lookups
-- **Food system**: Probabilistic spawning (0.6/tick), clustering near existing food (30% chance), max 250
-- **Tick order**: rebuild spatial grid → spawn food → for each creature (build inputs → update → check eat → check attack → check reproduce → remove dead) → cap population → update particles → enforce minimum population
-- **Population cap**: MAX_CREATURES=350, kills lowest-energy creatures if exceeded
-- **Minimum population**: If < 5, spawns 10 new random creatures
-- **Particle system**: Visual effects for eat (green sparkles), attack (orange flash), reproduce (cyan ring), die (red fade). Max 200 particles.
-- **Event listeners**: Spawns particles on creature events, tracks totalBirths/totalDeaths
+- **Food system**: Probabilistic spawning (6.0/tick), clustering near existing food (30% chance), max 2500
+- **Tick order**: rebuild spatial grid → spawn food → apply mutation storm boost → for each creature (build inputs → update → check eat → check attack → check reproduce → remove dead) → restore mutation rate → cap population → check/trigger world events → apply active events → update particles → enforce minimum population
+- **Population cap**: MAX_CREATURES=800, kills lowest-energy creatures if exceeded
+- **Minimum population**: If < 30, spawns 50 new random creatures
+- **World events**: Random events every 2000-4000 ticks. 4 types: bloom (100 food burst), plague (area energy drain, efficiency-resistant), meteor (area kill + new zone), mutation storm (4x mutation rate). `activeEvents` array tracks ongoing events for renderer. `_checkWorldEvents()`, `_triggerWorldEvent(type)`, `_applyActiveEvents()`.
+- **Particle system**: Visual effects for eat (green sparkles), attack (orange flash), reproduce (cyan ring), die (red fade). Max 400 particles.
+- **Event listeners**: Spawns particles on creature events, tracks totalBirths/totalDeaths. Emits `world:event` for UI notifications.
 
 ### Renderer (renderer.js)
 - **Key class**: `EcoSim.Renderer`
@@ -141,24 +142,28 @@ ui.js ← main.js
 ## Configuration (config.js)
 Key tunable values:
 ```
-WORLD: 1600x900, 50px grid cells
-CREATURES: 60 initial, 350 max, 4-14 size, 3.5 max speed
+WORLD: 4800x2700, 50px grid cells
+CREATURES: 150 initial, 800 max, 4-14 size, 3.5 max speed, 180 vision range
 ENERGY: 100 initial, 250 max, 0.08 drain/tick, reproduction threshold 160, reproduction cost 70
 NEURAL NET: 17→10→8→5 with tanh activations (313 params/brain)
-FOOD: 0.6 spawn rate, 250 max, 35 energy, 30% cluster chance
+FOOD: 6.0 spawn rate, 2500 max, 35 energy, 30% cluster chance
 GENETICS: 15% mutation rate, 0.25 mutation strength, 5% crossover rate
-RENDERING: 8-position trails, 200 max particles
+RENDERING: 8-position trails, 400 max particles
+EVENTS: 2000-4000 tick intervals, bloom(350px/100food), plague(500px/300ticks), meteor(250px kill), mutation storm(600ticks/4x)
+ISLANDS: 2 islands (vertical split), 150px ocean gap, 0.03% migration chance/tick, 500 tick min interval
 ```
 
 ## Event System
 `EcoSim.Events` — simple pub/sub: `on(event, fn)`, `emit(event, data)`, `off(event, fn)`
 
-Events (all emitted by creature.js methods only — world.js just listens):
+Events:
 - `creature:eat` → `{ creature }` — when creature eats food
 - `creature:attack` → `{ creature, target }` — when creature attacks another
 - `creature:reproduce` → `{ creature, offspring }` — when creature reproduces
 - `creature:die` → `{ creature }` — when creature dies
 - `food:add` → `{ food }` — when food is manually added
+- `world:event` → `{ type, label }` — when a world event triggers (bloom/plague/meteor/mutationStorm)
+- `creature:migrate` → `{ creature, fromIsland, toIsland }` — when a creature migrates between islands
 
 ## Bug Fixes Applied (During Build)
 1. **Duplicate event emissions**: Removed redundant event emits from world.js (_checkEating, _checkAttacking, _checkReproduction, update dead handling). Creature.js is now the sole event emitter.
@@ -213,9 +218,25 @@ Events (all emitted by creature.js methods only — world.js just listens):
 28. **Enhanced Particle Effects**: Eat=burst of green-teal luminous sparks, Attack=orange-red energy flash with lightning bolt lines, Reproduction=double-ring with inner glow fill, Death=creature-colored particles drifting outward.
 29. **CSS Bioluminescent Theme**: New accent colors (--teal, --violet), alternating panel title bar colors, panel hover glow, animated chart border gradient, speed button active pulse, header title pulse animation, subtitle shimmer gradient text, minimap teal glow border, stat value transition animation.
 
+## v3.1 World Events + Camera + Balance (Feb 2026)
+30. **World Events System**: Random events trigger every 2000-4000 ticks (configurable). 4 event types: **Food Bloom** (100 food in 350px radius, green glow effect), **Plague** (energy drain in 500px radius for 300 ticks, high-efficiency creatures resist), **Meteor Impact** (kills creatures in 250px blast, creates new fertile zone), **Mutation Storm** (4x mutation rate for 600 ticks). Visual effects rendered in world space. Events emit `world:event` on event bus.
+31. **Event Notification Banner**: Floating banner at top of canvas showing event type name. Color-coded per event type (green/violet/orange/purple). Slides in, auto-hides after 3 seconds. CSS animations with backdrop blur.
+32. **Left-Click Drag Camera**: Left mouse drag now pans camera (5px threshold distinguishes click from drag). Click still selects creatures. Cursor shows `grab`/`grabbing`. Right-click drag also still works.
+33. **Population Balance**: Rebalanced for 4800x2700 world — food spawn rate 1.5→6.0, food max 600→2500, vision range 120→180, min population check 15/25→30/50.
+
+## v3.2 Performance Optimization (Feb 2026)
+34. **Gradient Sprite Caching**: Pre-rendered 12 hue-bucketed creature glow sprites + 2 food glow sprites + aggression aura sprite as 64x64 offscreen canvases. `drawImage()` replaces ~4,500 `createRadialGradient()` calls per frame. Background gradient cached per dayPhase.
+35. **Level-of-Detail (LOD) Rendering**: 3 LOD tiers based on apparent pixel size (`creature.size * finalScale`). LOD 0 (<3px): single filled circle, 1 draw call. LOD 1 (3-8px): circle + glow sprite only. LOD 2 (>8px): full detail. Same tiers for food. Trails skipped for LOD 0 creatures.
+36. **Simulation Tick Budgeting**: `SIM_BUDGET_MS=12` time-budgeted while loop replaces fixed for loop. At 10x speed: runs as many ticks as fit in 12ms. Rendering always gets its frame time. Smooth 60 FPS instead of 8 FPS stuttering.
+37. **Spatial Grid Optimization**: Flat array grid (`col * GRID_ROWS + row`) replaces string-keyed hash. Bitwise truncation `(x/50)|0`. Bounds-clamped queries. Food grid dirty flag — only rebuild when food changes. Plague uses spatial query. NN `forward()` returns pre-allocated Float32Array directly.
+38. **Grid Pattern Optimization**: `createPattern()` from 50x50 tile canvas. Single `fillRect()` replaces ~5,184 individual `arc()` calls.
+
+## v3.3 Island System (Feb 2026)
+39. **Multiple Islands**: World divided into 2-4 rectangular island regions separated by 150px "deep ocean" gaps. `ISLAND_COUNT` config: 1=disabled, 2=vertical split, 4=2x2 grid. Creatures confined to their island via boundary enforcement. Wall proximity NN inputs use island bounds. Food/zones/events all constrained to islands. Per-island minimum population. Rare migration events teleport creatures between islands with portal animation. Offspring inherit parent's island. Ocean rendered with dark fill, drifting bioluminescent particles, and glowing island edges. Minimap shows island boundaries. Inspector shows island assignment. Migration notification banner. Serialization preserves island state with backwards-compatible loading.
+
 ## Current State
-- **Status**: FUNCTIONAL v3.0 — 13 files, ~7,400 lines
-- **Latest features**: Full alien bioluminescent visual overhaul (creatures, world, UI)
+- **Status**: FUNCTIONAL v3.3 — 13 files, ~9,000 lines
+- **Latest features**: Island system (isolated evolution, migration events, ocean rendering)
 - **Known minor issues**:
   - Info overlay `textContent` replaces child spans (cosmetic — works fine as plain text)
   - Stats panel innerHTML replaces HTML-defined stat rows (functional — stats.js takes over)

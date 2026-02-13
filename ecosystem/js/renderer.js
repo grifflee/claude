@@ -124,6 +124,18 @@
     }
     this._dpr = window.devicePixelRatio || 1;
 
+    // Performance caches — glow sprites, LOD, background
+    this._glowSprites = {};       // hue-bucketed creature glow sprites
+    this._foodGlowSprites = {};   // plant/meat glow sprites
+    this._gridPatternObj = null;  // pre-rendered grid tile pattern
+    this._bgGradient = null;      // cached background gradient
+    this._bgDayPhase = -1;        // dayPhase when bg was last computed
+    this._bgLogicalW = 0;
+    this._bgLogicalH = 0;
+    this._finalScale = 1;         // stored per frame for LOD checks
+
+    this._initGlowSprites();
+
     this.brainCanvas.width = 300 * this._dpr;
     this.brainCanvas.height = 180 * this._dpr;
     this.brainCanvas.style.width = '300px';
@@ -161,6 +173,68 @@
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   };
 
+  // ---------------------------------------------------------------
+  // _initGlowSprites() — pre-render glow textures to offscreen canvases
+  // ---------------------------------------------------------------
+  Renderer.prototype._initGlowSprites = function () {
+    var spriteSize = 64;
+    var half = spriteSize / 2;
+    var hue, canvas, sctx, grad;
+
+    // 12 creature glow sprites (one per 30-degree hue bucket)
+    for (hue = 0; hue < 360; hue += 30) {
+      canvas = document.createElement('canvas');
+      canvas.width = spriteSize;
+      canvas.height = spriteSize;
+      sctx = canvas.getContext('2d');
+      grad = sctx.createRadialGradient(half, half, 0, half, half, half);
+      grad.addColorStop(0, 'hsla(' + hue + ', 85%, 75%, 1)');
+      grad.addColorStop(0.5, 'hsla(' + hue + ', 85%, 75%, 0.4)');
+      grad.addColorStop(1, 'hsla(' + hue + ', 85%, 75%, 0)');
+      sctx.fillStyle = grad;
+      sctx.fillRect(0, 0, spriteSize, spriteSize);
+      this._glowSprites[hue] = canvas;
+    }
+
+    // Plant food glow sprite
+    canvas = document.createElement('canvas');
+    canvas.width = spriteSize;
+    canvas.height = spriteSize;
+    sctx = canvas.getContext('2d');
+    grad = sctx.createRadialGradient(half, half, 0, half, half, half);
+    grad.addColorStop(0, 'rgba(124, 255, 107, 1)');
+    grad.addColorStop(0.4, 'rgba(0, 229, 200, 0.4)');
+    grad.addColorStop(1, 'rgba(0, 229, 200, 0)');
+    sctx.fillStyle = grad;
+    sctx.fillRect(0, 0, spriteSize, spriteSize);
+    this._foodGlowSprites.plant = canvas;
+
+    // Meat food glow sprite
+    canvas = document.createElement('canvas');
+    canvas.width = spriteSize;
+    canvas.height = spriteSize;
+    sctx = canvas.getContext('2d');
+    grad = sctx.createRadialGradient(half, half, 0, half, half, half);
+    grad.addColorStop(0, 'rgba(255, 80, 60, 1)');
+    grad.addColorStop(0.6, 'rgba(255, 50, 40, 0.35)');
+    grad.addColorStop(1, 'rgba(255, 50, 40, 0)');
+    sctx.fillStyle = grad;
+    sctx.fillRect(0, 0, spriteSize, spriteSize);
+    this._foodGlowSprites.meat = canvas;
+
+    // Aggression aura glow sprite
+    canvas = document.createElement('canvas');
+    canvas.width = spriteSize;
+    canvas.height = spriteSize;
+    sctx = canvas.getContext('2d');
+    grad = sctx.createRadialGradient(half, half, half * 0.23, half, half, half);
+    grad.addColorStop(0, 'rgba(255, 40, 20, 1)');
+    grad.addColorStop(1, 'rgba(255, 40, 20, 0)');
+    sctx.fillStyle = grad;
+    sctx.fillRect(0, 0, spriteSize, spriteSize);
+    this._glowSprites.aggression = canvas;
+  };
+
   Renderer.prototype.render = function (world) {
     var ctx = this.ctx;
     var canvas = this.worldCanvas;
@@ -179,21 +253,29 @@
     var offsetX = logicalWidth * 0.5 - camera.x * finalScale;
     var offsetY = logicalHeight * 0.5 - camera.y * finalScale;
 
-    // Store for screenToWorld calculations
+    // Store for screenToWorld calculations and LOD
     this._scale = finalScale;
     this._offsetX = offsetX;
     this._offsetY = offsetY;
+    this._finalScale = finalScale;
 
-    // Deep-sea gradient background with day/night modulation
+    // Deep-sea gradient background with day/night modulation (cached)
     var dayPhase = world.getDayNightPhase ? world.getDayNightPhase() : 0.5;
-    var bgBase = 6 + Math.round(dayPhase * 6);
-    var bgGrad = ctx.createRadialGradient(
-      logicalWidth * 0.5, logicalHeight * 0.5, 0,
-      logicalWidth * 0.5, logicalHeight * 0.5, Math.max(logicalWidth, logicalHeight) * 0.7
-    );
-    bgGrad.addColorStop(0, 'rgb(' + (bgBase + 4) + ',' + (bgBase + 8) + ',' + (bgBase + 18) + ')');
-    bgGrad.addColorStop(1, 'rgb(' + bgBase + ',' + (bgBase + 2) + ',' + (bgBase + 8) + ')');
-    ctx.fillStyle = bgGrad;
+    if (!this._bgGradient || abs(dayPhase - this._bgDayPhase) > 0.05 ||
+        this._bgLogicalW !== logicalWidth || this._bgLogicalH !== logicalHeight) {
+      var bgBase = 6 + Math.round(dayPhase * 6);
+      var bgGrad = ctx.createRadialGradient(
+        logicalWidth * 0.5, logicalHeight * 0.5, 0,
+        logicalWidth * 0.5, logicalHeight * 0.5, max(logicalWidth, logicalHeight) * 0.7
+      );
+      bgGrad.addColorStop(0, 'rgb(' + (bgBase + 4) + ',' + (bgBase + 8) + ',' + (bgBase + 18) + ')');
+      bgGrad.addColorStop(1, 'rgb(' + bgBase + ',' + (bgBase + 2) + ',' + (bgBase + 8) + ')');
+      this._bgGradient = bgGrad;
+      this._bgDayPhase = dayPhase;
+      this._bgLogicalW = logicalWidth;
+      this._bgLogicalH = logicalHeight;
+    }
+    ctx.fillStyle = this._bgGradient;
     ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
     ctx.save();
@@ -204,6 +286,7 @@
     // Only cull when zoomed in (at zoom <= 1.0, everything is visible)
     var bounds = camera.zoom > 1.0 ? this.getViewBounds() : null;
 
+    this.drawIslandOcean(ctx, world);
     this.drawGrid(ctx, world.width, world.height, bounds);
     this.drawWorldBorder(ctx, world.width, world.height);
     this.drawZones(ctx, world.zones);
@@ -222,6 +305,12 @@
     }
 
     this.drawCreatures(ctx, world.creatures, world.tick, bounds);
+
+    // Migration portal effects
+    if (world._migrationEffects && world._migrationEffects.length > 0) {
+      this.drawMigrationEffect(ctx, world._migrationEffects, world.tick);
+    }
+
     this.drawParticles(ctx, world.particles, bounds);
 
     if (world.selectedCreature && world.selectedCreature.alive) {
@@ -253,6 +342,30 @@
     ctx.clearRect(0, 0, mw, mh);
     ctx.fillStyle = 'rgba(10, 14, 23, 0.9)';
     ctx.fillRect(0, 0, mw, mh);
+
+    // Draw island ocean gaps
+    if (world.islands && world.islands.length >= 2) {
+      ctx.fillStyle = 'rgba(2, 4, 10, 0.9)';
+      if (world.islands.length === 2) {
+        var mgX1 = world.islands[0].bounds.x2 * sx;
+        var mgX2 = world.islands[1].bounds.x1 * sx;
+        ctx.fillRect(mgX1, 0, mgX2 - mgX1, mh);
+      } else if (world.islands.length >= 4) {
+        var mvX1 = world.islands[0].bounds.x2 * sx;
+        var mvX2 = world.islands[1].bounds.x1 * sx;
+        var mhY1 = world.islands[0].bounds.y2 * sy;
+        var mhY2 = world.islands[2].bounds.y1 * sy;
+        ctx.fillRect(mvX1, 0, mvX2 - mvX1, mh);
+        ctx.fillRect(0, mhY1, mw, mhY2 - mhY1);
+      }
+      // Island boundary lines
+      ctx.strokeStyle = 'rgba(0, 180, 200, 0.3)';
+      ctx.lineWidth = 0.5;
+      for (var mi = 0; mi < world.islands.length; mi++) {
+        var mb = world.islands[mi].bounds;
+        ctx.strokeRect(mb.x1 * sx, mb.y1 * sy, (mb.x2 - mb.x1) * sx, (mb.y2 - mb.y1) * sy);
+      }
+    }
 
     // Draw zones as faint circles
     var i, z;
@@ -309,29 +422,215 @@
     }
   };
 
-  Renderer.prototype.drawGrid = function (ctx, width, height, bounds) {
-    // Organic dot grid — faint dots at intersections instead of lines
-    var step = 50;
-    var x, y;
-    var x0, x1, y0, y1;
+  // ---------------------------------------------------------------
+  // drawIslandOcean(ctx, world) — dark ocean gaps between islands
+  // ---------------------------------------------------------------
+  Renderer.prototype.drawIslandOcean = function (ctx, world) {
+    var islands = world.islands;
+    if (!islands || islands.length < 2) return;
+    var tick = this._borderTick || 0;
+    var gap = EcoSim.Config.ISLAND_GAP;
 
-    if (bounds) {
-      x0 = max(0, Math.floor(bounds.left / step) * step);
-      x1 = min(width, Math.ceil(bounds.right / step) * step);
-      y0 = max(0, Math.floor(bounds.top / step) * step);
-      y1 = min(height, Math.ceil(bounds.bottom / step) * step);
-    } else {
-      x0 = 0; x1 = width;
-      y0 = 0; y1 = height;
-    }
+    // Draw full dark overlay, then clear island areas
+    // More efficient: just draw the gap regions directly
 
-    ctx.fillStyle = 'rgba(100, 180, 255, 0.05)';
-    for (x = x0; x <= x1; x += step) {
-      for (y = y0; y <= y1; y += step) {
+    if (islands.length === 2) {
+      // Vertical gap between two islands
+      var gapX1 = islands[0].bounds.x2;
+      var gapX2 = islands[1].bounds.x1;
+      // Dark ocean fill
+      ctx.fillStyle = 'rgba(2, 4, 10, 0.85)';
+      ctx.fillRect(gapX1, 0, gapX2 - gapX1, world.height);
+
+      // Bioluminescent particles drifting in the ocean
+      for (var i = 0; i < 15; i++) {
+        var py = ((tick * 0.3 + i * world.height / 15) % world.height);
+        var px = gapX1 + (gap * 0.5) + sin(tick * 0.02 + i * 2.1) * gap * 0.3;
+        var pAlpha = 0.03 + 0.02 * sin(tick * 0.04 + i * 1.7);
+        var pHue = 190 + (i * 17) % 40;
+        ctx.fillStyle = 'hsla(' + pHue + ', 70%, 60%, ' + pAlpha + ')';
         ctx.beginPath();
-        ctx.arc(x, y, 0.8, 0, TAU);
+        ctx.arc(px, py, 1.5 + sin(tick * 0.03 + i) * 0.5, 0, TAU);
         ctx.fill();
       }
+
+      // Soft glow edges along island boundaries
+      var glowW = 30;
+      // Right edge of west island
+      var edgeGrad = ctx.createLinearGradient(gapX1 - glowW, 0, gapX1, 0);
+      edgeGrad.addColorStop(0, 'rgba(0, 180, 200, 0)');
+      edgeGrad.addColorStop(1, 'rgba(0, 180, 200, ' + (0.04 + 0.02 * sin(tick * 0.03)) + ')');
+      ctx.fillStyle = edgeGrad;
+      ctx.fillRect(gapX1 - glowW, 0, glowW, world.height);
+
+      // Left edge of east island
+      edgeGrad = ctx.createLinearGradient(gapX2, 0, gapX2 + glowW, 0);
+      edgeGrad.addColorStop(0, 'rgba(0, 180, 200, ' + (0.04 + 0.02 * sin(tick * 0.03)) + ')');
+      edgeGrad.addColorStop(1, 'rgba(0, 180, 200, 0)');
+      ctx.fillStyle = edgeGrad;
+      ctx.fillRect(gapX2, 0, glowW, world.height);
+
+    } else if (islands.length >= 4) {
+      // 2x2 grid — horizontal and vertical gap channels
+      var hGapY1 = islands[0].bounds.y2;
+      var hGapY2 = islands[2].bounds.y1;
+      var vGapX1 = islands[0].bounds.x2;
+      var vGapX2 = islands[1].bounds.x1;
+
+      ctx.fillStyle = 'rgba(2, 4, 10, 0.85)';
+      // Vertical channel (full height)
+      ctx.fillRect(vGapX1, 0, vGapX2 - vGapX1, world.height);
+      // Horizontal channel (full width, but don't double-fill intersection)
+      ctx.fillRect(0, hGapY1, vGapX1, hGapY2 - hGapY1);
+      ctx.fillRect(vGapX2, hGapY1, world.width - vGapX2, hGapY2 - hGapY1);
+
+      // Particles in both channels
+      var gapCenterX = (vGapX1 + vGapX2) * 0.5;
+      var gapCenterY = (hGapY1 + hGapY2) * 0.5;
+      for (var j = 0; j < 20; j++) {
+        var jx, jy;
+        if (j < 10) {
+          // Vertical channel particles
+          jy = ((tick * 0.3 + j * world.height / 10) % world.height);
+          jx = gapCenterX + sin(tick * 0.02 + j * 2.1) * gap * 0.3;
+        } else {
+          // Horizontal channel particles
+          jx = ((tick * 0.25 + (j - 10) * world.width / 10) % world.width);
+          jy = gapCenterY + sin(tick * 0.02 + j * 1.8) * gap * 0.3;
+        }
+        var ja = 0.03 + 0.02 * sin(tick * 0.04 + j * 1.7);
+        var jh = 190 + (j * 17) % 40;
+        ctx.fillStyle = 'hsla(' + jh + ', 70%, 60%, ' + ja + ')';
+        ctx.beginPath();
+        ctx.arc(jx, jy, 1.5, 0, TAU);
+        ctx.fill();
+      }
+
+      // Glow edges for all 4 islands
+      var glowSize = 30;
+      var glowAlpha = 0.04 + 0.02 * sin(tick * 0.03);
+      var gi, gIsland, gb, gGrad;
+      for (gi = 0; gi < islands.length; gi++) {
+        gIsland = islands[gi];
+        gb = gIsland.bounds;
+        // Right edge glow (if not at world right)
+        if (gb.x2 < world.width - 10) {
+          gGrad = ctx.createLinearGradient(gb.x2 - glowSize, 0, gb.x2, 0);
+          gGrad.addColorStop(0, 'rgba(0, 180, 200, 0)');
+          gGrad.addColorStop(1, 'rgba(0, 180, 200, ' + glowAlpha + ')');
+          ctx.fillStyle = gGrad;
+          ctx.fillRect(gb.x2 - glowSize, gb.y1, glowSize, gb.y2 - gb.y1);
+        }
+        // Left edge glow (if not at world left)
+        if (gb.x1 > 10) {
+          gGrad = ctx.createLinearGradient(gb.x1, 0, gb.x1 + glowSize, 0);
+          gGrad.addColorStop(0, 'rgba(0, 180, 200, ' + glowAlpha + ')');
+          gGrad.addColorStop(1, 'rgba(0, 180, 200, 0)');
+          ctx.fillStyle = gGrad;
+          ctx.fillRect(gb.x1, gb.y1, glowSize, gb.y2 - gb.y1);
+        }
+        // Bottom edge glow (if not at world bottom)
+        if (gb.y2 < world.height - 10) {
+          gGrad = ctx.createLinearGradient(0, gb.y2 - glowSize, 0, gb.y2);
+          gGrad.addColorStop(0, 'rgba(0, 180, 200, 0)');
+          gGrad.addColorStop(1, 'rgba(0, 180, 200, ' + glowAlpha + ')');
+          ctx.fillStyle = gGrad;
+          ctx.fillRect(gb.x1, gb.y2 - glowSize, gb.x2 - gb.x1, glowSize);
+        }
+        // Top edge glow (if not at world top)
+        if (gb.y1 > 10) {
+          gGrad = ctx.createLinearGradient(0, gb.y1, 0, gb.y1 + glowSize);
+          gGrad.addColorStop(0, 'rgba(0, 180, 200, ' + glowAlpha + ')');
+          gGrad.addColorStop(1, 'rgba(0, 180, 200, 0)');
+          ctx.fillStyle = gGrad;
+          ctx.fillRect(gb.x1, gb.y1, gb.x2 - gb.x1, glowSize);
+        }
+      }
+    }
+  };
+
+  // ---------------------------------------------------------------
+  // drawMigrationEffect(ctx, effects, tick) — portal rings for migration
+  // ---------------------------------------------------------------
+  Renderer.prototype.drawMigrationEffect = function (ctx, effects, tick) {
+    if (!effects || effects.length === 0) return;
+    var i, eff, progress, alpha, radius;
+
+    for (i = 0; i < effects.length; i++) {
+      eff = effects[i];
+      progress = 1 - (eff.ticksLeft / eff.maxTicks);
+      alpha = (1 - progress) * 0.6;
+      radius = 10 + progress * 40;
+
+      // Source portal — expanding ring fading out
+      ctx.strokeStyle = 'hsla(' + round(eff.hue) + ', 80%, 65%, ' + alpha + ')';
+      ctx.lineWidth = max(0.5, 3 * (1 - progress));
+      ctx.beginPath();
+      ctx.arc(eff.fromX, eff.fromY, radius, 0, TAU);
+      ctx.stroke();
+
+      // Inner glow at source
+      var srcGrad = ctx.createRadialGradient(eff.fromX, eff.fromY, 0, eff.fromX, eff.fromY, radius * 0.6);
+      srcGrad.addColorStop(0, 'hsla(' + round(eff.hue) + ', 80%, 65%, ' + (alpha * 0.2) + ')');
+      srcGrad.addColorStop(1, 'hsla(' + round(eff.hue) + ', 80%, 65%, 0)');
+      ctx.fillStyle = srcGrad;
+      ctx.beginPath();
+      ctx.arc(eff.fromX, eff.fromY, radius * 0.6, 0, TAU);
+      ctx.fill();
+
+      // Destination portal — contracting ring appearing
+      var destAlpha = progress * 0.6;
+      var destRadius = 40 * (1 - progress * 0.5);
+      ctx.strokeStyle = 'hsla(' + round(eff.hue) + ', 80%, 65%, ' + destAlpha + ')';
+      ctx.lineWidth = max(0.5, 3 * progress);
+      ctx.beginPath();
+      ctx.arc(eff.toX, eff.toY, destRadius, 0, TAU);
+      ctx.stroke();
+
+      // Inner glow at destination
+      var dstGrad = ctx.createRadialGradient(eff.toX, eff.toY, 0, eff.toX, eff.toY, destRadius * 0.6);
+      dstGrad.addColorStop(0, 'hsla(' + round(eff.hue) + ', 80%, 65%, ' + (destAlpha * 0.3) + ')');
+      dstGrad.addColorStop(1, 'hsla(' + round(eff.hue) + ', 80%, 65%, 0)');
+      ctx.fillStyle = dstGrad;
+      ctx.beginPath();
+      ctx.arc(eff.toX, eff.toY, destRadius * 0.6, 0, TAU);
+      ctx.fill();
+
+      // Sparkle particles along migration path
+      var sparkCount = 5;
+      for (var s = 0; s < sparkCount; s++) {
+        var t = (progress + s * 0.15) % 1;
+        var sx = eff.fromX + (eff.toX - eff.fromX) * t;
+        var sy = eff.fromY + (eff.toY - eff.fromY) * t;
+        sx += sin(tick * 0.1 + s * 2) * 8;
+        sy += cos(tick * 0.1 + s * 2) * 8;
+        var sAlpha = (1 - abs(t - 0.5) * 2) * alpha * 0.5;
+        ctx.fillStyle = 'hsla(' + round(eff.hue) + ', 80%, 75%, ' + sAlpha + ')';
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2, 0, TAU);
+        ctx.fill();
+      }
+    }
+  };
+
+  Renderer.prototype.drawGrid = function (ctx, width, height, bounds) {
+    // Organic dot grid — single fillRect with a repeating pattern tile
+    if (!this._gridPatternObj) {
+      var tile = document.createElement('canvas');
+      tile.width = 50;
+      tile.height = 50;
+      var tctx = tile.getContext('2d');
+      tctx.fillStyle = 'rgba(100, 180, 255, 0.05)';
+      tctx.beginPath();
+      tctx.arc(0, 0, 0.8, 0, TAU);
+      tctx.fill();
+      this._gridPatternObj = ctx.createPattern(tile, 'repeat');
+    }
+    ctx.fillStyle = this._gridPatternObj;
+    if (bounds) {
+      ctx.fillRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+    } else {
+      ctx.fillRect(0, 0, width, height);
     }
   };
 
@@ -534,31 +833,51 @@
   };
 
   Renderer.prototype.drawFood = function (ctx, food, bounds) {
-    var i, f, pulse, glowRadius, grad, isMeat;
+    var i, f, pulse, glowRadius, isMeat;
     var spawnFade, j, tAngle, tLen, tx, ty;
     var tick = this._borderTick || 0;
+    var scale = this._finalScale;
+    var LOD0 = Config.LOD_THRESHOLD_0;
+    var LOD1 = Config.LOD_THRESHOLD_1;
 
     for (i = 0; i < food.length; i++) {
       f = food[i];
       if (bounds && (f.x < bounds.left || f.x > bounds.right ||
           f.y < bounds.top || f.y > bounds.bottom)) continue;
+
       isMeat = f.type === 'meat';
+      var apparentSize = f.size * scale;
+
+      // LOD 0: tiny on screen — single colored rect
+      if (apparentSize < LOD0) {
+        ctx.fillStyle = isMeat ? '#ff5040' : '#7cff6b';
+        ctx.fillRect(f.x - f.size, f.y - f.size, f.size * 2, f.size * 2);
+        continue;
+      }
+
       pulse = 0.7 + 0.3 * sin(f.age * 0.05 + i);
       spawnFade = min(1, f.age / 10);
       glowRadius = (f.size + 6) * pulse;
 
-      if (isMeat) {
-        // Organic red matter — irregular overlapping circles
-        grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, glowRadius);
-        grad.addColorStop(0, 'rgba(255, 80, 60, ' + (0.3 * f.glow * pulse * spawnFade) + ')');
-        grad.addColorStop(0.6, 'rgba(255, 50, 40, ' + (0.1 * f.glow * pulse * spawnFade) + ')');
-        grad.addColorStop(1, 'rgba(255, 50, 40, 0)');
-        ctx.fillStyle = grad;
+      // LOD 1: medium — glow sprite + central dot, no tendrils/blobs
+      if (apparentSize < LOD1) {
+        var sprite = isMeat ? this._foodGlowSprites.meat : this._foodGlowSprites.plant;
+        ctx.globalAlpha = 0.3 * f.glow * pulse * spawnFade;
+        ctx.drawImage(sprite, f.x - glowRadius, f.y - glowRadius, glowRadius * 2, glowRadius * 2);
+        ctx.globalAlpha = spawnFade;
+        ctx.fillStyle = isMeat ? '#ff5040' : '#7cff6b';
         ctx.beginPath();
-        ctx.arc(f.x, f.y, glowRadius, 0, TAU);
+        ctx.arc(f.x, f.y, f.size, 0, TAU);
         ctx.fill();
+        ctx.globalAlpha = 1;
+        continue;
+      }
 
-        // Irregular blob shape (3-4 overlapping circles)
+      // LOD 2: full detail
+      if (isMeat) {
+        // Organic red matter — glow sprite + irregular overlapping circles
+        ctx.globalAlpha = 0.3 * f.glow * pulse * spawnFade;
+        ctx.drawImage(this._foodGlowSprites.meat, f.x - glowRadius, f.y - glowRadius, glowRadius * 2, glowRadius * 2);
         ctx.globalAlpha = spawnFade * 0.8;
         ctx.fillStyle = '#ff5040';
         for (j = 0; j < 3; j++) {
@@ -570,17 +889,9 @@
         }
         ctx.globalAlpha = 1;
       } else {
-        // Plant spore — bright dot with radiating tendrils
-        grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, glowRadius);
-        grad.addColorStop(0, 'rgba(124, 255, 107, ' + (0.4 * f.glow * pulse * spawnFade) + ')');
-        grad.addColorStop(0.4, 'rgba(0, 229, 200, ' + (0.15 * f.glow * pulse * spawnFade) + ')');
-        grad.addColorStop(1, 'rgba(0, 229, 200, 0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(f.x, f.y, glowRadius, 0, TAU);
-        ctx.fill();
-
-        // Central bright dot
+        // Plant spore — glow sprite + bright dot + radiating tendrils
+        ctx.globalAlpha = 0.4 * f.glow * pulse * spawnFade;
+        ctx.drawImage(this._foodGlowSprites.plant, f.x - glowRadius, f.y - glowRadius, glowRadius * 2, glowRadius * 2);
         ctx.globalAlpha = spawnFade;
         ctx.fillStyle = '#7cff6b';
         ctx.beginPath();
@@ -665,11 +976,201 @@
     }
   };
 
+  // ---------------------------------------------------------------
+  // drawWorldEvents(ctx, events, tick) — visual effects for active world events
+  // ---------------------------------------------------------------
+  Renderer.prototype.drawWorldEvents = function (ctx, events, tick) {
+    var i, evt, progress, alpha, grad, j;
+
+    for (i = 0; i < events.length; i++) {
+      evt = events[i];
+      progress = 1 - (evt.ticksLeft / evt.maxTicks);
+
+      switch (evt.type) {
+        case 'bloom':
+          // Green-teal expanding glow ring with inner fill
+          var bloomAlpha = (1 - progress) * 0.6;
+          var bloomRing = evt.radius * (0.3 + progress * 0.7);
+
+          // Soft inner fill
+          grad = ctx.createRadialGradient(evt.x, evt.y, 0, evt.x, evt.y, bloomRing);
+          grad.addColorStop(0, 'rgba(124, 255, 107, ' + (bloomAlpha * 0.15) + ')');
+          grad.addColorStop(0.5, 'rgba(0, 229, 200, ' + (bloomAlpha * 0.08) + ')');
+          grad.addColorStop(1, 'rgba(0, 229, 200, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(evt.x, evt.y, bloomRing, 0, TAU);
+          ctx.fill();
+
+          // Expanding ring
+          ctx.strokeStyle = 'rgba(124, 255, 107, ' + (bloomAlpha * 0.5) + ')';
+          ctx.lineWidth = max(1, 3 * (1 - progress));
+          ctx.beginPath();
+          ctx.arc(evt.x, evt.y, bloomRing, 0, TAU);
+          ctx.stroke();
+
+          // Sparkle particles within bloom area
+          for (j = 0; j < 8; j++) {
+            var sAngle = j * TAU / 8 + tick * 0.03 + i;
+            var sDist = bloomRing * (0.3 + 0.5 * sin(tick * 0.05 + j * 1.7));
+            var sx = evt.x + cos(sAngle) * sDist;
+            var sy = evt.y + sin(sAngle) * sDist;
+            var sPulse = 0.5 + 0.5 * sin(tick * 0.1 + j * 2);
+            ctx.fillStyle = 'rgba(124, 255, 107, ' + (bloomAlpha * sPulse * 0.4) + ')';
+            ctx.beginPath();
+            ctx.arc(sx, sy, 2, 0, TAU);
+            ctx.fill();
+          }
+          break;
+
+        case 'plague':
+          // Purple-red toxic cloud with pulsing particles
+          var plagueAlpha = min(1, progress < 0.1 ? progress / 0.1 : 1) *
+                            (evt.ticksLeft > 30 ? 1 : evt.ticksLeft / 30);
+          var plaguePulse = 0.7 + 0.3 * sin(tick * 0.06);
+          var plagueR = evt.radius * plaguePulse;
+
+          // Toxic cloud gradient
+          grad = ctx.createRadialGradient(evt.x, evt.y, 0, evt.x, evt.y, plagueR);
+          grad.addColorStop(0, 'rgba(180, 40, 180, ' + (plagueAlpha * 0.12) + ')');
+          grad.addColorStop(0.4, 'rgba(120, 20, 80, ' + (plagueAlpha * 0.08) + ')');
+          grad.addColorStop(0.7, 'rgba(80, 0, 60, ' + (plagueAlpha * 0.04) + ')');
+          grad.addColorStop(1, 'rgba(80, 0, 60, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(evt.x, evt.y, plagueR, 0, TAU);
+          ctx.fill();
+
+          // Pulsing border
+          ctx.strokeStyle = 'rgba(200, 50, 180, ' + (plagueAlpha * 0.2 * plaguePulse) + ')';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(evt.x, evt.y, plagueR * 0.95, 0, TAU);
+          ctx.stroke();
+
+          // Floating toxic spore particles
+          for (j = 0; j < 12; j++) {
+            var pAngle = j * TAU / 12 + tick * 0.015 * (j % 2 === 0 ? 1 : -1);
+            var pDist = evt.radius * (0.2 + 0.6 * sin(tick * 0.02 + j * 0.8));
+            var px = evt.x + cos(pAngle) * pDist;
+            var py = evt.y + sin(pAngle) * pDist;
+            var pSize = 1.5 + sin(tick * 0.08 + j) * 0.8;
+            ctx.fillStyle = 'rgba(200, 80, 200, ' + (plagueAlpha * 0.25) + ')';
+            ctx.beginPath();
+            ctx.arc(px, py, max(0.5, pSize), 0, TAU);
+            ctx.fill();
+          }
+          break;
+
+        case 'meteor':
+          // Bright flash → expanding shockwave → crater glow
+          var meteorPhase = progress;
+
+          if (meteorPhase < 0.15) {
+            // Bright white flash (first 15% of animation)
+            var flashIntensity = 1 - (meteorPhase / 0.15);
+            grad = ctx.createRadialGradient(evt.x, evt.y, 0, evt.x, evt.y, evt.radius * 0.8);
+            grad.addColorStop(0, 'rgba(255, 255, 255, ' + (flashIntensity * 0.6) + ')');
+            grad.addColorStop(0.3, 'rgba(255, 200, 100, ' + (flashIntensity * 0.3) + ')');
+            grad.addColorStop(1, 'rgba(255, 150, 50, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(evt.x, evt.y, evt.radius * 0.8, 0, TAU);
+            ctx.fill();
+          }
+
+          // Expanding shockwave ring
+          var shockRadius = evt.radius * (0.3 + meteorPhase * 1.2);
+          var shockAlpha = (1 - meteorPhase) * 0.5;
+          ctx.strokeStyle = 'rgba(255, 160, 50, ' + shockAlpha + ')';
+          ctx.lineWidth = max(0.5, 4 * (1 - meteorPhase));
+          ctx.beginPath();
+          ctx.arc(evt.x, evt.y, shockRadius, 0, TAU);
+          ctx.stroke();
+
+          // Secondary inner ring
+          if (meteorPhase < 0.6) {
+            var innerRadius = evt.radius * meteorPhase * 0.8;
+            ctx.strokeStyle = 'rgba(255, 220, 150, ' + ((0.6 - meteorPhase) * 0.4) + ')';
+            ctx.lineWidth = max(0.3, 2 * (1 - meteorPhase));
+            ctx.beginPath();
+            ctx.arc(evt.x, evt.y, innerRadius, 0, TAU);
+            ctx.stroke();
+          }
+
+          // Crater glow (persists toward end)
+          if (meteorPhase > 0.2) {
+            var craterAlpha = (1 - meteorPhase) * 0.2;
+            grad = ctx.createRadialGradient(evt.x, evt.y, 0, evt.x, evt.y, evt.radius * 0.6);
+            grad.addColorStop(0, 'rgba(255, 120, 40, ' + craterAlpha + ')');
+            grad.addColorStop(0.5, 'rgba(200, 80, 20, ' + (craterAlpha * 0.5) + ')');
+            grad.addColorStop(1, 'rgba(200, 80, 20, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(evt.x, evt.y, evt.radius * 0.6, 0, TAU);
+            ctx.fill();
+          }
+
+          // Flying debris particles
+          if (meteorPhase < 0.5) {
+            for (j = 0; j < 10; j++) {
+              var dAngle = j * TAU / 10 + evt.x * 0.01;
+              var dDist = evt.radius * (0.5 + meteorPhase * 2) * (0.5 + 0.5 * sin(j * 3.7));
+              var debX = evt.x + cos(dAngle) * dDist;
+              var debY = evt.y + sin(dAngle) * dDist;
+              var debAlpha = (0.5 - meteorPhase) * 0.6;
+              var debSize = max(0.5, 2 * (1 - meteorPhase * 2));
+              ctx.fillStyle = 'rgba(255, 180, 80, ' + debAlpha + ')';
+              ctx.beginPath();
+              ctx.arc(debX, debY, debSize, 0, TAU);
+              ctx.fill();
+            }
+          }
+          break;
+
+        case 'mutationStorm':
+          // Subtle purple atmospheric tint + sparkles across the world
+          var stormAlpha = min(1, progress < 0.05 ? progress / 0.05 : 1) *
+                           (evt.ticksLeft > 60 ? 1 : evt.ticksLeft / 60);
+
+          // Subtle full-world purple tint via the event center (very large radius)
+          grad = ctx.createRadialGradient(evt.x, evt.y, 0, evt.x, evt.y, evt.radius * 0.5);
+          grad.addColorStop(0, 'rgba(180, 100, 255, ' + (stormAlpha * 0.02) + ')');
+          grad.addColorStop(1, 'rgba(180, 100, 255, ' + (stormAlpha * 0.01) + ')');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, evt.x * 2, evt.y * 2);
+
+          // Scattered sparkles across the world
+          for (j = 0; j < 20; j++) {
+            var msX = sin(tick * 0.007 + j * 47.3) * evt.x + evt.x;
+            var msY = cos(tick * 0.009 + j * 31.7) * evt.y + evt.y;
+            var msPulse = 0.5 + 0.5 * sin(tick * 0.15 + j * 2.3);
+            var msSize = 1 + msPulse * 1.5;
+            var msAlpha = stormAlpha * msPulse * 0.3;
+            ctx.fillStyle = 'rgba(200, 150, 255, ' + msAlpha + ')';
+            ctx.beginPath();
+            ctx.arc(msX, msY, msSize, 0, TAU);
+            ctx.fill();
+            // Tiny glow halo
+            ctx.fillStyle = 'rgba(200, 150, 255, ' + (msAlpha * 0.3) + ')';
+            ctx.beginPath();
+            ctx.arc(msX, msY, msSize * 3, 0, TAU);
+            ctx.fill();
+          }
+          break;
+      }
+    }
+  };
+
   Renderer.prototype.drawCreatureTrails = function (ctx, creatures, bounds) {
     var i, creature, trail, j, alpha, tp, k;
+    var scale = this._finalScale;
+    var LOD0 = Config.LOD_THRESHOLD_0;
 
     for (i = 0; i < creatures.length; i++) {
       creature = creatures[i];
+      // Skip trails for LOD 0 creatures (too small to see trails)
+      if (creature.size * scale < LOD0) continue;
       if (bounds && (creature.x < bounds.left || creature.x > bounds.right ||
           creature.y < bounds.top || creature.y > bounds.bottom)) continue;
       trail = creature.trailPositions;
@@ -698,9 +1199,12 @@
   };
 
   Renderer.prototype.drawCreatures = function (ctx, creatures, tick, bounds) {
-    var i, creature, cx, cy, r, angle, grad;
+    var i, creature, cx, cy, r, angle;
     var j, spotAngle, spotDist, spotX, spotY;
-    var tSeed, tAngle, tBaseAngle, tLen, tWave, tx1, ty1, tx2, ty2;
+    var tSeed, tBaseAngle, tLen, tWave, tx1, ty1, tx2, ty2;
+    var scale = this._finalScale;
+    var LOD0 = Config.LOD_THRESHOLD_0;
+    var LOD1 = Config.LOD_THRESHOLD_1;
 
     for (i = 0; i < creatures.length; i++) {
       creature = creatures[i];
@@ -711,15 +1215,50 @@
 
       if (bounds && (cx < bounds.left || cx > bounds.right ||
           cy < bounds.top || cy > bounds.bottom)) continue;
-      r = creature.size;
-      angle = creature.angle;
 
+      r = creature.size;
+      var apparentSize = r * scale;
+
+      // LOD 0: < 3px on screen — single filled circle
+      if (apparentSize < LOD0) {
+        ctx.fillStyle = 'hsla(' + round(creature.bodyGenes.hue) + ', 70%, 55%, 0.7)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, TAU);
+        ctx.fill();
+        continue;
+      }
+
+      angle = creature.angle;
       var dirX = cos(angle);
       var dirY = sin(angle);
       var lum = creature.bodyGenes.luminosity !== undefined ? creature.bodyGenes.luminosity : 0.7;
       var energyRatio = min(1, max(0, creature.energy / Config.CREATURE_MAX_ENERGY));
       var hue = creature.bodyGenes.hue;
       var sat = creature.bodyGenes.saturation;
+
+      // LOD 1: 3-8px on screen — circle + glow sprite, no tendrils/spots/signals
+      if (apparentSize < LOD1) {
+        // Membrane circle
+        ctx.fillStyle = creature.getMembraneColor(Config.CREATURE_MEMBRANE_ALPHA + lum * 0.1);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, TAU);
+        ctx.fill();
+
+        // Core glow via sprite
+        var corePulse1 = 0.7 + 0.3 * sin(tick * 0.06 + creature.id);
+        var coreAlpha1 = Config.CREATURE_GLOW_INTENSITY * lum * energyRatio * corePulse1;
+        var spriteHue1 = (round(hue / 30) * 30) % 360;
+        var glowSprite1 = this._glowSprites[spriteHue1];
+        if (glowSprite1) {
+          ctx.globalAlpha = coreAlpha1;
+          var gr1 = r * 0.8;
+          ctx.drawImage(glowSprite1, cx - gr1, cy - gr1, gr1 * 2, gr1 * 2);
+          ctx.globalAlpha = 1;
+        }
+        continue;
+      }
+
+      // LOD 2: Full detail rendering
       var aggression = creature.bodyGenes.aggression;
 
       // --- 1. Tendrils (drawn behind body) ---
@@ -730,7 +1269,7 @@
 
       for (j = 0; j < tCount; j++) {
         tSeed = tSeeds[j];
-        tBaseAngle = angle + PI + (j - (tCount - 1) * 0.5) * 0.5; // spread behind
+        tBaseAngle = angle + PI + (j - (tCount - 1) * 0.5) * 0.5;
         tLen = tendrilBaseLen * (0.7 + 0.3 * sin(tSeed + j));
         tWave = sin(tick * 0.1 + tSeed + j * 1.7) * r * 0.4;
 
@@ -755,24 +1294,24 @@
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(angle);
-      ctx.scale(1.1, 0.95 + memWobble / r); // slightly elongated in movement direction
+      ctx.scale(1.1, 0.95 + memWobble / r);
       ctx.fillStyle = creature.getMembraneColor(memAlpha);
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, TAU);
       ctx.fill();
       ctx.restore();
 
-      // --- 3. Aggression aura (spiky membrane distortion + red glow) ---
+      // --- 3. Aggression aura (glow sprite + spiky membrane) ---
       if (aggression > 0.6) {
-        var aggrIntensity = (aggression - 0.6) * 2.5; // 0 to 1
-        // Red-shifted secondary glow
-        var aggrGrad = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * 1.3);
-        aggrGrad.addColorStop(0, 'rgba(255, 40, 20, ' + (0.08 * aggrIntensity) + ')');
-        aggrGrad.addColorStop(1, 'rgba(255, 40, 20, 0)');
-        ctx.fillStyle = aggrGrad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 1.3, 0, TAU);
-        ctx.fill();
+        var aggrIntensity = (aggression - 0.6) * 2.5;
+        // Red-shifted glow via sprite
+        var aggrSprite = this._glowSprites.aggression;
+        if (aggrSprite) {
+          ctx.globalAlpha = 0.08 * aggrIntensity;
+          var aggrR = r * 1.3;
+          ctx.drawImage(aggrSprite, cx - aggrR, cy - aggrR, aggrR * 2, aggrR * 2);
+          ctx.globalAlpha = 1;
+        }
 
         // Spiky membrane distortion
         if (aggrIntensity > 0.3) {
@@ -794,28 +1333,25 @@
         }
       }
 
-      // --- 4. Inner core glow (radial gradient, pulsing) ---
+      // --- 4. Inner core glow (sprite-based, pulsing) ---
       var corePulse = 0.7 + 0.3 * sin(tick * 0.06 + creature.id);
       var coreAlpha = Config.CREATURE_GLOW_INTENSITY * lum * energyRatio * corePulse;
-      var coreOffX = dirX * r * 0.15; // slightly forward
+      var coreOffX = dirX * r * 0.15;
       var coreOffY = dirY * r * 0.15;
-      var coreGrad = ctx.createRadialGradient(
-        cx + coreOffX, cy + coreOffY, 0,
-        cx + coreOffX, cy + coreOffY, r * 0.8
-      );
-      coreGrad.addColorStop(0, creature.getGlowColor(coreAlpha));
-      coreGrad.addColorStop(0.5, creature.getGlowColor(coreAlpha * 0.4));
-      coreGrad.addColorStop(1, creature.getGlowColor(0));
-      ctx.fillStyle = coreGrad;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, TAU);
-      ctx.fill();
+      var spriteHue = (round(hue / 30) * 30) % 360;
+      var glowSprite = this._glowSprites[spriteHue];
+      if (glowSprite) {
+        ctx.globalAlpha = coreAlpha;
+        var glowR = r * 0.8;
+        ctx.drawImage(glowSprite, cx + coreOffX - glowR, cy + coreOffY - glowR, glowR * 2, glowR * 2);
+        ctx.globalAlpha = 1;
+      }
 
       // --- 5. Bioluminescent spots (3-5 glowing dots on membrane) ---
       var spots = creature.spotSeeds || [];
       var spotCount = min(spots.length, r < 6 ? 2 : (r < 10 ? 3 : 5));
       for (j = 0; j < spotCount; j++) {
-        spotAngle = spots[j] + angle; // rotate with creature
+        spotAngle = spots[j] + angle;
         spotDist = r * (0.5 + 0.3 * sin(spots[j] * 3));
         spotX = cx + cos(spotAngle) * spotDist;
         spotY = cy + sin(spotAngle) * spotDist;
@@ -831,13 +1367,11 @@
       if (creature.energy > REPRODUCTION_THRESHOLD) {
         var reproPhase = (tick + creature.id * 7) % 30;
         var reproGlowAlpha = 0.12 + 0.08 * sin(tick * 0.1);
-        // Constant outer glow
         ctx.strokeStyle = 'rgba(100, 255, 220, ' + reproGlowAlpha + ')';
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.arc(cx, cy, r + 3 + sin(tick * 0.08) * 1.5, 0, TAU);
         ctx.stroke();
-        // Heartbeat pulse ring (expanding circle every ~30 ticks)
         if (reproPhase < 15) {
           var ringProgress = reproPhase / 15;
           var ringAlpha = (1 - ringProgress) * 0.25;
@@ -854,8 +1388,7 @@
       if (creature.signal && abs(creature.signal) > 0.3) {
         var sigVal = creature.signal;
         var sigStr = abs(sigVal) - 0.3;
-        var sigColor = sigVal > 0 ? '255, 210, 60' : '180, 100, 255'; // warm gold / cool violet
-        // 2-3 concentric expanding rings
+        var sigColor = sigVal > 0 ? '255, 210, 60' : '180, 100, 255';
         var sigRings = 2 + (sigStr > 0.4 ? 1 : 0);
         for (j = 0; j < sigRings; j++) {
           var sigPhase = ((tick * 0.06 + j * 0.4 + creature.id * 0.1) % 1);
@@ -871,24 +1404,19 @@
 
       // --- 8. Action indicators ---
       if (creature.lastAction === 'eating') {
-        // Inner core flash green
-        var eatGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.8);
-        eatGrad.addColorStop(0, 'rgba(100, 255, 150, 0.35)');
-        eatGrad.addColorStop(1, 'rgba(100, 255, 150, 0)');
-        ctx.fillStyle = eatGrad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.8, 0, TAU);
-        ctx.fill();
+        ctx.globalAlpha = 0.35;
+        var eatSprite = this._glowSprites[120] || this._glowSprites[90];
+        if (eatSprite) {
+          ctx.drawImage(eatSprite, cx - r * 0.8, cy - r * 0.8, r * 1.6, r * 1.6);
+        }
+        ctx.globalAlpha = 1;
       } else if (creature.lastAction === 'attacking') {
-        // Membrane flare with red energy
-        var atkGrad = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * 1.5);
-        atkGrad.addColorStop(0, 'rgba(255, 60, 30, 0.2)');
-        atkGrad.addColorStop(0.6, 'rgba(255, 60, 30, 0.08)');
-        atkGrad.addColorStop(1, 'rgba(255, 60, 30, 0)');
-        ctx.fillStyle = atkGrad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 1.5, 0, TAU);
-        ctx.fill();
+        ctx.globalAlpha = 0.2;
+        var atkSprite = this._glowSprites.aggression;
+        if (atkSprite) {
+          ctx.drawImage(atkSprite, cx - r * 1.5, cy - r * 1.5, r * 3, r * 3);
+        }
+        ctx.globalAlpha = 1;
         // Brief red energy tendrils extending forward
         ctx.strokeStyle = 'rgba(255, 60, 30, 0.4)';
         ctx.lineWidth = 1;

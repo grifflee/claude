@@ -102,6 +102,17 @@ EcoSim.Config = {
   EVENT_MUTATION_STORM_DURATION: 600, // ticks of boosted mutation
   EVENT_MUTATION_STORM_MULTIPLIER: 4, // mutation rate multiplier
 
+  // ---- Performance / LOD ----
+  LOD_THRESHOLD_0: 3,           // below this pixel size: single dot (1 draw call)
+  LOD_THRESHOLD_1: 8,           // below this pixel size: circle + glow sprite only
+  SIM_BUDGET_MS: 12,            // max ms for simulation ticks per frame
+
+  // ---- Islands ----
+  ISLAND_COUNT: 2,              // 2 = vertical split, 4 = 2x2 grid, 1 = disabled
+  ISLAND_GAP: 150,              // pixels of ocean between islands
+  MIGRATION_CHANCE: 0.0003,     // per-tick chance of a migration event
+  MIGRATION_MIN_INTERVAL: 500,  // minimum ticks between migrations
+
   // ---- Simulation ----
   TARGET_FPS: 60,
   TICKS_PER_FRAME: 1,          // adjustable speed

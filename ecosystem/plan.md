@@ -124,27 +124,50 @@ Double-click canvas to toggle fullscreen. Minimap, zoom indicator, and info over
 
 ---
 
-## Phase 6: Performance Optimization (Priority: LOW — only if needed)
+## Phase 6: Performance Optimization -- MOSTLY DONE
 
-### 6.1 Offscreen Trail Canvas
-**File**: `renderer.js`
-**Description**: Trails are expensive because they draw many small line segments. Use an offscreen canvas that persists between frames and slowly fades (multiply by 0.95 alpha each frame), then draw new trail points on top. Dramatically reduces draw calls.
+### 6.1 Gradient Sprite Caching -- DONE
+- Pre-rendered 12 hue-bucketed creature glow sprites (64x64 offscreen canvases) + 2 food glow sprites + aggression aura sprite
+- `drawImage()` replaces ~4,500 `createRadialGradient()` calls per frame
+- Hue-bucketed to 30° intervals (matches species quantization)
+- Background gradient cached and only recreated when dayPhase changes by >0.05
 
-### 6.2 Creature Draw Batching
-**File**: `renderer.js`
-**Description**: Batch creatures by similar hue/saturation and draw in groups to reduce canvas state changes. Pre-compute colors as hex strings.
+### 6.2 Level-of-Detail (LOD) Rendering -- DONE
+- 3 LOD tiers based on `creature.size * finalScale` (apparent pixel size):
+  - LOD 0 (< 3px): Single filled circle, 1 draw call. No tendrils/spots/signals/trails.
+  - LOD 1 (3-8px): Circle + glow sprite. No tendrils/spots/signals.
+  - LOD 2 (> 8px): Full bioluminescent rendering.
+- Food LOD: < 3px = single fillRect, 3-8px = sprite+dot, >8px = full tendrils
+- Trails skipped entirely for LOD 0 creatures
 
-### 6.3 Web Worker Simulation
-**File**: New `worker.js`
-**Description**: Move the simulation (world.update) to a Web Worker. Renderer stays on main thread. Communicate via postMessage with creature positions/states.
-**Complexity**: HIGH — requires serializing world state each frame.
+### 6.3 Simulation Tick Budgeting -- DONE
+- `SIM_BUDGET_MS = 12` — max time for simulation ticks per frame
+- `while` loop replaces fixed `for` loop, checks `performance.now()` budget
+- At 10x speed: runs as many ticks as fit in 12ms, rendering always gets time
+- Smooth 60 FPS at effective 3-5x instead of stuttery 8 FPS at full 10x
 
-### 6.4 Viewport Culling -- DONE
+### 6.4 Spatial Grid Optimization -- DONE
+- Flat array grid (`col * GRID_ROWS + row`) replaces string-keyed object hash
+- `(x / 50) | 0` bitwise truncation instead of `Math.floor()`
+- Bounds-clamped grid queries (skip out-of-bounds cells)
+- Food grid dirty flag — only rebuild when food actually changes (~6 times/tick vs every tick)
+- Plague event uses spatial query instead of iterating all creatures
+- NN `forward()` returns pre-allocated `lastOutputs` directly (no array copy)
+
+### 6.5 Grid Pattern Optimization -- DONE
+- Dot grid uses `createPattern()` from 50x50 tile canvas
+- Single `fillRect()` replaces ~5,184 individual `arc()` calls
+
+### 6.6 Viewport Culling -- DONE (previous)
 - `getViewBounds()` computes visible world area from camera transform with 50px margin
 - Bounds passed to drawFood, drawCreatureTrails, drawCreatures, drawParticles
 - Each draw method skips entities outside bounds with simple AABB check
 - Only active when zoomed in (camera.zoom > 1.0) — zero overhead at default zoom
-- Null-check pattern: `bounds && (x < left || ...)` short-circuits when bounds is null
+
+### 6.7 Future (only if needed)
+- **Offscreen Trail Canvas**: Persistent trail canvas with fade-and-accumulate approach
+- **Web Worker Simulation**: Move `world.update()` to worker thread for true parallel sim+render
+- **WebGL Renderer**: Full rewrite for instanced rendering (only if targeting 2000+ creatures)
 
 ---
 
@@ -159,8 +182,21 @@ Double-click canvas to toggle fullscreen. Minimap, zoom indicator, and info over
 - Camera viewport shown on minimap when zoomed in
 - Zoom indicator displays in top-left when zoomed
 
-### 7.2 Multiple Worlds / Islands
-**Description**: Split the world into 2-4 separate islands with occasional migration between them. Creates isolated evolutionary paths that occasionally mix.
+### 7.2 Multiple Worlds / Islands -- DONE
+- Single World instance divided into 2-4 rectangular island regions separated by "deep ocean" gaps (150px wide)
+- Island count configurable: `ISLAND_COUNT` (1=disabled, 2=vertical split, 4=2x2 grid)
+- Creatures confined to their assigned island via boundary enforcement (bounce off island walls)
+- Wall proximity NN inputs (8-11) use island bounds instead of world edges
+- Food spawns only within islands (zone-biased, cluster, and random spawning all constrained)
+- Fertile zones distributed across islands and bounce off island bounds
+- World events trigger within random island bounds
+- Per-island minimum population enforcement (15 min per island, spawns 25 if below)
+- Rare migration events (`MIGRATION_CHANCE: 0.0003/tick`, min 500 tick interval): teleports random creature to different island with portal visual effect
+- Offspring inherit parent's island assignment
+- Rendering: dark ocean channel between islands with drifting bioluminescent particles, soft glow edges along island boundaries, migration portal rings (source + destination), minimap shows island boundaries and ocean gaps
+- Serialization: saves/loads creature islandId, detects island config changes on load and reassigns creatures by position
+- UI: creature inspector shows island assignment, migration notification banner (teal)
+- Implemented in: `config.js` (island constants), `creature.js` (islandId), `world.js` (~120 lines: init, boundary, migration, food/zone/event constraints), `renderer.js` (~130 lines: ocean, borders, migration effects, minimap), `serialization.js` (~20 lines: save/load island state), `ui.js` (~10 lines: inspector + migration banner), `style.css` (migration banner)
 
 ### 7.3 Creature Sound -- DONE
 - WebAudio API ambient soundscape: quiet drone modulated by population size
@@ -217,7 +253,10 @@ When continuing development:
 ~~12. Phase 5.2 (graph improvements)~~ DONE
 ~~13. Phase 7.3 (creature sound) + Phase 7.4 (evolution timeline) + Phase 7.5 (NN heatmap) + Phase 7.6 (export creature) + Phase 6.4 (viewport culling)~~ DONE
 ~~14. Phase 8 (Full Visual Overhaul — Alien Bioluminescent)~~ DONE
-15. **NEXT**: Phase 7.2 (multiple worlds/islands)
+~~15. Phase 9 (World Events System — bloom, plague, meteor, mutation storm)~~ DONE
+~~16. Phase 6 (Performance optimization — gradient sprites, LOD, tick budgeting, spatial grid, grid pattern)~~ DONE
+~~17. Phase 7.2 (multiple worlds/islands)~~ DONE
+18. **NEXT**: Phase 6.7 (further performance if needed) or new Phase 10 features
 
 ---
 
@@ -268,6 +307,28 @@ When continuing development:
 - `getMembraneColor(alpha)` — desaturated for outer membrane
 - `tendrilCount`, `tendrilSeeds`, `spotSeeds` per creature (deterministic from ID)
 - Backwards-compatible: old saves default luminosity to 0.7
+
+---
+
+## Phase 9: World Events System -- DONE
+
+### 9.1 Event Scheduling -- DONE
+- Random world events trigger every 2000-4000 ticks
+- 4 event types selected randomly: bloom, plague, meteor, mutation storm
+- Events have active durations with visual effects and gameplay impacts
+- Events emit `world:event` on the event bus for UI notifications
+
+### 9.2 Event Types -- DONE
+**Food Bloom**: 100 food items spawn in a 350px radius circle. Visual: expanding green-teal glow ring with sparkles. Duration: 120 ticks visual.
+**Plague**: Creatures within 500px radius take energy damage (0.4/tick). High-efficiency creatures resist (damage scaled by `1.5 - efficiency`). Visual: purple toxic cloud with pulsing border and floating spore particles. Duration: 300 ticks.
+**Meteor Impact**: Instantly kills all creatures within 250px radius. Creates a new fertile zone (300px, 3-5x food boost) at impact point. Visual: white flash → orange expanding shockwave → crater glow with flying debris. Duration: 90 ticks visual.
+**Mutation Storm**: Boosts mutation rate 4x and mutation strength 1.5x for all reproduction during the storm. Visual: subtle purple atmospheric tint with scattered purple sparkles across world. Duration: 600 ticks.
+
+### 9.3 Event Notification Banner -- DONE
+- Floating banner centered at top of canvas, styled per event type
+- Color-coded: bloom=green, plague=violet, meteor=orange, mutation storm=purple
+- Slides in with fade, auto-hides after 3 seconds
+- Implemented in: `config.js` (constants), `world.js` (scheduling + effects), `renderer.js` (visual effects), `ui.js` (banner listener), `index.html` (banner element), `style.css` (banner styles)
 
 ---
 
