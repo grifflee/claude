@@ -37,7 +37,7 @@
       <section class="panel">
         <h2 class="panel-title">Population</h2>
         <div class="chart-wrapper">
-          <canvas id="pop-chart" width="300" height="120"></canvas>
+          <canvas id="pop-chart" width="300" height="130"></canvas>
         </div>
       </section>
 
@@ -46,6 +46,14 @@
         <h2 class="panel-title">Species</h2>
         <div class="chart-wrapper">
           <canvas id="species-chart" width="300" height="100"></canvas>
+        </div>
+      </section>
+
+      <!-- Evolution Timeline -->
+      <section class="panel">
+        <h2 class="panel-title">Evolution</h2>
+        <div class="chart-wrapper">
+          <canvas id="evo-chart" width="300" height="100"></canvas>
         </div>
       </section>
 
@@ -133,6 +141,12 @@
           </div>
           <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:4px">Scroll=zoom | Right-drag=pan | WASD=move | Dbl-click=fullscreen</div>
         </div>
+        <div class="control-group">
+          <label class="control-label">Audio</label>
+          <div class="button-row">
+            <button class="action-btn" id="sound-toggle-btn">Sound Off (m)</button>
+          </div>
+        </div>
       </section>
 
       <!-- Universes -->
@@ -173,8 +187,8 @@
           </div>
           <div class="setting-row">
             <label class="setting-label">Food Spawn Rate</label>
-            <input type="range" class="setting-slider" id="slider-food-spawn" min="10" max="200" value="60" step="5">
-            <span class="setting-value" id="val-food-spawn">0.60</span>
+            <input type="range" class="setting-slider" id="slider-food-spawn" min="10" max="400" value="150" step="5">
+            <span class="setting-value" id="val-food-spawn">1.50</span>
           </div>
           <div class="setting-row">
             <label class="setting-label">Energy Drain</label>
@@ -195,8 +209,18 @@
         <p class="placeholder-text" id="inspector-placeholder">Click a creature to inspect</p>
         <div class="chart-wrapper">
           <canvas id="brain-canvas" width="300" height="180"></canvas>
+          <canvas id="heatmap-canvas" width="300" height="60" style="margin-top:4px"></canvas>
         </div>
         <div id="creature-details"></div>
+        <div id="genome-viewer"></div>
+        <div class="inspector-actions" id="inspector-actions" style="display:none">
+          <button class="action-btn" id="family-btn">Show Family (g)</button>
+          <div class="button-row" style="margin-top:6px">
+            <button class="action-btn" id="creature-export-btn">Export Creature</button>
+            <button class="action-btn" id="creature-import-btn">Import Creature</button>
+          </div>
+          <input type="file" id="creature-import-input" accept=".json" style="display:none">
+        </div>
       </section>
     </aside>
 
@@ -210,6 +234,7 @@
   <script src="js/serialization.js"></script>
   <script src="js/renderer.js"></script>
   <script src="js/stats.js"></script>
+  <script src="js/sound.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
 </body>

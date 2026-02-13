@@ -125,13 +125,13 @@
   // _initZones() -- create 2-3 fertile zones at random positions
   // ---------------------------------------------------------------
   World.prototype._initZones = function () {
-    var count = 2 + Math.floor(Math.random() * 2); // 2-3 zones
+    var count = 5 + Math.floor(Math.random() * 4); // 5-8 zones
     this.zones = [];
     for (var i = 0; i < count; i++) {
       this.zones.push({
-        x: 100 + Math.random() * (this.width - 200),
-        y: 100 + Math.random() * (this.height - 200),
-        radius: 120 + Math.random() * 80,
+        x: 150 + Math.random() * (this.width - 300),
+        y: 150 + Math.random() * (this.height - 300),
+        radius: 200 + Math.random() * 150,
         spawnMultiplier: 2 + Math.random() * 2, // 2-4x food spawn boost
         vx: (Math.random() - 0.5) * 0.02,       // very slow drift
         vy: (Math.random() - 0.5) * 0.02
@@ -327,8 +327,8 @@
     this._updateParticles();
 
     // Enforce minimum population
-    if (creatures.length < 5) {
-      for (i = 0; i < 10; i++) {
+    if (creatures.length < 15) {
+      for (i = 0; i < 25; i++) {
         this._spawnRandomCreature();
       }
     }
@@ -926,6 +926,62 @@
       mostFitCreature: mostFit,
       speciesCount: speciesCount,
       speciesDistribution: speciesMap
+    };
+  };
+
+  // ---------------------------------------------------------------
+  // getCreatureById(id) -- find a creature by ID
+  // ---------------------------------------------------------------
+  World.prototype.getCreatureById = function (id) {
+    var creatures = this.creatures;
+    for (var i = 0; i < creatures.length; i++) {
+      if (creatures[i].id === id) return creatures[i];
+    }
+    return null;
+  };
+
+  // ---------------------------------------------------------------
+  // getPopulationGeneAverages() -- compute mean of each body gene
+  // ---------------------------------------------------------------
+  World.prototype.getPopulationGeneAverages = function () {
+    var creatures = this.creatures;
+    var len = creatures.length;
+    if (len === 0) return null;
+
+    var sums = { size: 0, maxSpeed: 0, turnSpeed: 0, hue: 0, saturation: 0, aggression: 0, efficiency: 0, luminosity: 0 };
+    var i, g;
+
+    for (i = 0; i < len; i++) {
+      g = creatures[i].bodyGenes;
+      sums.size += g.size;
+      sums.maxSpeed += g.maxSpeed;
+      sums.turnSpeed += g.turnSpeed;
+      sums.saturation += g.saturation;
+      sums.aggression += g.aggression;
+      sums.efficiency += g.efficiency;
+      sums.luminosity += (g.luminosity !== undefined ? g.luminosity : 0.7);
+    }
+
+    // Hue needs circular mean (convert to radians, average sin/cos, convert back)
+    var sinSum = 0, cosSum = 0;
+    for (i = 0; i < len; i++) {
+      var hRad = creatures[i].bodyGenes.hue * Math.PI / 180;
+      sinSum += Math.sin(hRad);
+      cosSum += Math.cos(hRad);
+    }
+    var avgHue = Math.atan2(sinSum / len, cosSum / len) * 180 / Math.PI;
+    if (avgHue < 0) avgHue += 360;
+
+    var inv = 1 / len;
+    return {
+      size: sums.size * inv,
+      maxSpeed: sums.maxSpeed * inv,
+      turnSpeed: sums.turnSpeed * inv,
+      hue: avgHue,
+      saturation: sums.saturation * inv,
+      aggression: sums.aggression * inv,
+      efficiency: sums.efficiency * inv,
+      luminosity: sums.luminosity * inv
     };
   };
 

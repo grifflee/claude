@@ -8,6 +8,8 @@
 
   var COLOR_CYAN   = '#00d4ff';
   var COLOR_GREEN  = '#7cff6b';
+  var COLOR_ORANGE = '#ffa502';
+  var COLOR_RED    = '#ff4757';
   var COLOR_DIM    = 'rgba(255,255,255,0.3)';
   var COLOR_GRID   = 'rgba(255,255,255,0.06)';
   var COLOR_BG     = 'rgba(10,14,23,0.85)';
@@ -21,8 +23,13 @@
     this.popCtx     = popCanvas ? popCanvas.getContext('2d') : null;
     this.speciesCtx = speciesCanvas ? speciesCanvas.getContext('2d') : null;
 
+    // Evolution timeline canvas (self-discovered)
+    this.evoCanvas = document.getElementById('evo-chart');
+    this.evoCtx    = this.evoCanvas ? this.evoCanvas.getContext('2d') : null;
+
     this.populationHistory = [];
     this.speciesHistory    = [];
+    this.evoHistory        = [];
     this.maxHistoryLength  = 500;
     this.sampleInterval    = 10;
 
@@ -45,9 +52,12 @@
 
     if (stats.tick % this.sampleInterval === 0) {
       this.populationHistory.push({
-        tick:       stats.tick,
-        population: stats.population,
-        foodCount:  stats.foodCount
+        tick:         stats.tick,
+        population:   stats.population,
+        foodCount:    stats.foodCount,
+        totalBirths:  stats.totalBirths,
+        totalDeaths:  stats.totalDeaths,
+        speciesCount: stats.speciesCount
       });
       if (this.populationHistory.length > this.maxHistoryLength) {
         this.populationHistory.shift();
@@ -68,6 +78,23 @@
       if (this.speciesHistory.length > this.maxHistoryLength) {
         this.speciesHistory.shift();
       }
+
+      // Evolution timeline: track population-average genes
+      if (EcoSim.world && EcoSim.world.getPopulationGeneAverages) {
+        var avgs = EcoSim.world.getPopulationGeneAverages();
+        if (avgs) {
+          this.evoHistory.push({
+            tick: stats.tick,
+            size: avgs.size,
+            speed: avgs.maxSpeed,
+            aggression: avgs.aggression,
+            efficiency: avgs.efficiency
+          });
+          if (this.evoHistory.length > this.maxHistoryLength) {
+            this.evoHistory.shift();
+          }
+        }
+      }
     }
 
     this.frameCount++;
@@ -77,6 +104,7 @@
     if (this.frameCount % 3 === 0) {
       this.renderPopulationChart();
       this.renderSpeciesChart();
+      this.renderEvoChart();
     }
     if (this.frameCount % 10 === 0) {
       this.renderStatsPanel();
@@ -169,11 +197,52 @@
       foodData.push(hist[i].foodCount);
     }
 
+    // Compute birth/death rates (per interval)
+    var birthRates = [0];
+    var deathRates = [0];
+    for (i = 1; i < hist.length; i++) {
+      birthRates.push(Math.max(0, hist[i].totalBirths - hist[i - 1].totalBirths));
+      deathRates.push(Math.max(0, hist[i].totalDeaths - hist[i - 1].totalDeaths));
+    }
+
+    // Find max rate for secondary Y axis
+    var maxRate = 1;
+    for (i = 0; i < birthRates.length; i++) {
+      if (birthRates[i] > maxRate) maxRate = birthRates[i];
+      if (deathRates[i] > maxRate) maxRate = deathRates[i];
+    }
+    maxRate = Math.ceil(maxRate * 1.2);
+
+    function yOfRate(val) {
+      return padTop + chartH - (val / maxRate) * chartH;
+    }
+
+    // Draw rate lines (thin, behind main series)
+    function drawRateLine(data, color, yFn) {
+      if (data.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(xOf(0), yFn(data[0]));
+      for (var j = 1; j < data.length; j++) {
+        var cpx = (xOf(j - 1) + xOf(j)) / 2;
+        ctx.quadraticCurveTo(cpx, yFn(data[j - 1]), xOf(j), yFn(data[j]));
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.5;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    drawRateLine(deathRates, COLOR_RED, yOfRate);
+    drawRateLine(birthRates, COLOR_ORANGE, yOfRate);
+
     drawSeries(foodData, COLOR_GREEN, 0.1);
     drawSeries(popData,  COLOR_CYAN,  0.15);
 
     var lastPop  = popData[popData.length - 1];
     var lastFood = foodData[foodData.length - 1];
+    var lastBirth = birthRates[birthRates.length - 1];
+    var lastDeath = deathRates[deathRates.length - 1];
 
     ctx.font      = '10px monospace';
     ctx.textAlign = 'left';
@@ -184,16 +253,18 @@
     ctx.fillStyle = COLOR_GREEN;
     ctx.fillText(lastFood, padLeft + chartW + 5, yOf(lastFood) + 3);
 
+    // Legend
     var legendX = w - padRight + 4;
     var legendY = 4;
+
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'left';
 
     ctx.fillStyle = COLOR_CYAN;
     ctx.beginPath();
     ctx.arc(legendX, legendY + 4, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = COLOR_LABEL;
-    ctx.font      = '9px monospace';
-    ctx.textAlign = 'left';
     ctx.fillText('Pop', legendX + 6, legendY + 7);
 
     ctx.fillStyle = COLOR_GREEN;
@@ -202,6 +273,20 @@
     ctx.fill();
     ctx.fillStyle = COLOR_LABEL;
     ctx.fillText('Food', legendX + 6, legendY + 19);
+
+    ctx.fillStyle = COLOR_ORANGE;
+    ctx.beginPath();
+    ctx.arc(legendX, legendY + 28, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COLOR_LABEL;
+    ctx.fillText('B:' + lastBirth, legendX + 6, legendY + 31);
+
+    ctx.fillStyle = COLOR_RED;
+    ctx.beginPath();
+    ctx.arc(legendX, legendY + 38, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COLOR_LABEL;
+    ctx.fillText('D:' + lastDeath, legendX + 6, legendY + 41);
   };
 
   Stats.prototype.renderSpeciesChart = function () {
@@ -295,6 +380,13 @@
       ctx.fill();
       ctx.stroke();
     }
+
+    // Species count overlay
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.fillText(numSpecies + ' species', w - padRight - 4, padTop + 2);
   };
 
   function cumulativeFraction(proportions, col, speciesIndex) {
@@ -337,6 +429,93 @@
     return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
   }
 
+  // ---------------------------------------------------------------
+  // Evolution timeline — population-average traits over time
+  // ---------------------------------------------------------------
+  var EVO_TRAITS = [
+    { key: 'size',       label: 'Size',  color: '#00d4ff', min: 4,   max: 14 },
+    { key: 'speed',      label: 'Spd',   color: '#7cff6b', min: 1,   max: 3.5 },
+    { key: 'aggression', label: 'Aggr',  color: '#ff4757', min: 0,   max: 1 },
+    { key: 'efficiency', label: 'Eff',   color: '#ffa502', min: 0.5, max: 1.5 }
+  ];
+
+  Stats.prototype.renderEvoChart = function () {
+    var ctx = this.evoCtx;
+    if (!ctx) return;
+
+    var w = this.evoCanvas.width;
+    var h = this.evoCanvas.height;
+    var hist = this.evoHistory;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = COLOR_BG;
+    ctx.fillRect(0, 0, w, h);
+
+    if (hist.length < 2) {
+      ctx.fillStyle = COLOR_DIM;
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Waiting for data...', w / 2, h / 2);
+      return;
+    }
+
+    var padTop    = 8;
+    var padBottom = 4;
+    var padLeft   = 2;
+    var padRight  = 42;
+    var chartW    = w - padLeft - padRight;
+    var chartH    = h - padTop - padBottom;
+    var len       = hist.length;
+
+    function xOf(idx) {
+      return padLeft + (idx / (len - 1)) * chartW;
+    }
+
+    // Draw grid
+    ctx.strokeStyle = COLOR_GRID;
+    ctx.lineWidth = 1;
+    var midY = padTop + chartH * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, midY);
+    ctx.lineTo(padLeft + chartW, midY);
+    ctx.stroke();
+
+    // Draw each trait as a normalized line (0-1 within its range)
+    var ti, i, trait, val, normVal, y, prevY, cpx;
+
+    for (ti = 0; ti < EVO_TRAITS.length; ti++) {
+      trait = EVO_TRAITS[ti];
+      ctx.beginPath();
+      ctx.strokeStyle = trait.color;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.8;
+
+      val = hist[0][trait.key];
+      normVal = (val - trait.min) / (trait.max - trait.min);
+      normVal = Math.max(0, Math.min(1, normVal));
+      y = padTop + chartH - normVal * chartH;
+      ctx.moveTo(xOf(0), y);
+
+      for (i = 1; i < len; i++) {
+        val = hist[i][trait.key];
+        normVal = (val - trait.min) / (trait.max - trait.min);
+        normVal = Math.max(0, Math.min(1, normVal));
+        prevY = y;
+        y = padTop + chartH - normVal * chartH;
+        cpx = (xOf(i - 1) + xOf(i)) / 2;
+        ctx.quadraticCurveTo(cpx, prevY, xOf(i), y);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // End label
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = trait.color;
+      ctx.fillText(trait.label, padLeft + chartW + 4, y + 3);
+    }
+  };
+
   Stats.prototype.renderStatsPanel = function () {
     if (!this.statsPanel || !this.lastStats) return;
 
@@ -351,6 +530,7 @@
     }
 
     var rows = [
+      { label: 'Tick',       value: s.tick },
       { label: 'Generation', value: s.maxGeneration },
       { label: 'Population', value: s.population },
       { label: 'Food',       value: s.foodCount },
@@ -398,6 +578,7 @@
   Stats.prototype.reset = function () {
     this.populationHistory = [];
     this.speciesHistory    = [];
+    this.evoHistory        = [];
     this.frameTimestamps   = [];
     this.frameCount        = 0;
     this.lastStats         = null;
@@ -408,6 +589,9 @@
     }
     if (this.speciesCtx) {
       this.speciesCtx.clearRect(0, 0, this.speciesCanvas.width, this.speciesCanvas.height);
+    }
+    if (this.evoCtx) {
+      this.evoCtx.clearRect(0, 0, this.evoCanvas.width, this.evoCanvas.height);
     }
     if (this.statsPanel) {
       this.statsPanel.innerHTML = '';

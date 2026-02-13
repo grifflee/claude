@@ -7,13 +7,13 @@ window.EcoSim = window.EcoSim || {};
 
 EcoSim.Config = {
   // ---- World ----
-  WORLD_WIDTH: 1600,
-  WORLD_HEIGHT: 900,
+  WORLD_WIDTH: 4800,
+  WORLD_HEIGHT: 2700,
   GRID_CELL_SIZE: 50,          // spatial partitioning cell size
 
   // ---- Creatures ----
-  INITIAL_CREATURE_COUNT: 60,
-  MAX_CREATURES: 350,
+  INITIAL_CREATURE_COUNT: 150,
+  MAX_CREATURES: 800,
   CREATURE_MIN_SIZE: 4,
   CREATURE_MAX_SIZE: 14,
   CREATURE_MAX_SPEED: 3.5,
@@ -56,8 +56,8 @@ EcoSim.Config = {
   NN_OUTPUT_SIZE: 5,
 
   // ---- Food ----
-  FOOD_SPAWN_RATE: 0.6,       // avg food spawned per tick
-  FOOD_MAX_COUNT: 250,
+  FOOD_SPAWN_RATE: 1.5,       // avg food spawned per tick
+  FOOD_MAX_COUNT: 600,
   FOOD_ENERGY: 35,
   FOOD_SIZE: 3,
   FOOD_CLUSTER_CHANCE: 0.3,    // chance food spawns near existing food
@@ -72,7 +72,14 @@ EcoSim.Config = {
   BG_COLOR: '#0a0e17',
   GRID_COLOR: 'rgba(255,255,255,0.03)',
   TRAIL_LENGTH: 8,
-  PARTICLE_LIMIT: 200,
+  PARTICLE_LIMIT: 400,
+
+  // ---- Rendering — Bioluminescent ----
+  CREATURE_GLOW_INTENSITY: 0.7,
+  CREATURE_TENDRIL_LENGTH: 0.8,
+  CREATURE_MEMBRANE_ALPHA: 0.2,
+  TRAIL_PARTICLE_COUNT: 2,
+  AMBIENT_PARTICLE_TYPES: 3,
 
   // ---- Day/Night Cycle ----
   DAY_CYCLE_LENGTH: 3000,       // ticks per full day/night cycle

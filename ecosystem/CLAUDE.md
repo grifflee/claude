@@ -5,7 +5,7 @@ EcoSim is a fully interactive, browser-based artificial life simulation where di
 
 **Created**: Feb 2026
 **Tech**: Vanilla JS, HTML5 Canvas, no frameworks or build tools
-**Total**: ~5,500 lines across 12 files (v2.3 with camera, communication, fullscreen)
+**Total**: ~7,400 lines across 13 files (v3.0 with alien bioluminescent visual overhaul)
 
 ## Architecture
 
@@ -18,20 +18,21 @@ ecosystem/
 ├── css/
 │   └── style.css           # Dark-themed UI (~700 lines)
 └── js/
-    ├── config.js            # Shared constants, event bus, ID generator (~110 lines)
-    ├── neural.js            # Feedforward neural network with Float32Arrays (307 lines)
-    ├── serialization.js     # Multi-universe save system, server API + localStorage fallback (~415 lines)
-    ├── creature.js          # Creature class: brain, body genes, lifecycle (519 lines)
-    ├── world.js             # Simulation engine: spatial grid, physics, food (851 lines)
-    ├── renderer.js          # Canvas rendering: creatures, food, particles, brain viz (600+ lines)
+    ├── config.js            # Shared constants, event bus, ID generator (111 lines)
+    ├── neural.js            # Feedforward neural network with Float32Arrays (311 lines)
+    ├── serialization.js     # Multi-universe save system, server API + localStorage fallback (440 lines)
+    ├── creature.js          # Creature class: brain, body genes, lifecycle (527 lines)
+    ├── world.js             # Simulation engine: spatial grid, physics, food (944 lines)
+    ├── renderer.js          # Canvas rendering: creatures, food, camera, brain viz (763 lines)
     ├── stats.js             # Population/species charts, statistics tracking (419 lines)
-    ├── ui.js                # Controls, click interaction, universe panel (450+ lines)
-    └── main.js              # Game loop, initialization, auto-save hook (113 lines)
+    ├── sound.js             # WebAudio creature sound system, ambient drone (250 lines)
+    ├── ui.js                # Controls, camera, universe panel, screenshot (694 lines)
+    └── main.js              # Game loop, initialization, auto-save hook (120 lines)
 ```
 
 ### Load Order (Critical)
 Scripts load via `<script>` tags in index.html in dependency order:
-1. config.js → 2. neural.js → 3. serialization.js → 4. creature.js → 5. world.js → 6. renderer.js → 7. stats.js → 8. ui.js → 9. main.js
+1. config.js → 2. neural.js → 3. creature.js → 4. world.js → 5. serialization.js → 6. renderer.js → 7. stats.js → 8. sound.js → 9. ui.js → 10. main.js
 
 Note: serialization.js loads early and runs `init()` immediately to detect whether the server API is available.
 
@@ -42,6 +43,7 @@ All modules use IIFEs and attach to `window.EcoSim` namespace.
 config.js ← (everything depends on this)
 neural.js ← creature.js
 creature.js ← world.js
+sound.js ← ui.js, main.js (event-driven via EcoSim.Events)
 world.js ← renderer.js, stats.js, ui.js
 renderer.js ← main.js
 stats.js ← main.js
@@ -63,7 +65,7 @@ ui.js ← main.js
 
 ### Creature System (creature.js)
 - **Key class**: `EcoSim.Creature`
-- **Body Genes**: `{ size, maxSpeed, turnSpeed, hue, saturation, aggression, efficiency }`
+- **Body Genes**: `{ size, maxSpeed, turnSpeed, hue, saturation, aggression, efficiency, luminosity }`
   - Each gene has a defined range in `GENE_RANGES`
   - Hue wraps around 0-360
 - **Species ID**: Quantized `hue_size` (hue to nearest 30°, size to nearest 3)
@@ -86,12 +88,14 @@ ui.js ← main.js
 
 ### Renderer (renderer.js)
 - **Key class**: `EcoSim.Renderer`
+- **Camera system**: `this.camera = {x, y, zoom}`. Default: centered on world, zoom=1. `screenToWorld(sx, sy)`, `zoomAt(sx, sy, factor)`, `resetCamera()`
+- **Transform**: `finalScale = baseScale * camera.zoom`, offsetX/Y computed from camera center. Stored as `_scale`, `_offsetX`, `_offsetY` for inverse mapping
 - **High-DPI**: Uses devicePixelRatio for crisp rendering on Retina displays
-- **Aspect-ratio correct**: Uses `min(scaleX, scaleY)` with centering offsets
-- **Creature rendering**: Radial gradient body, directional bump (nose), white eyes with dark pupils, reproduction glow ring, attack/eat flash rings
-- **Food rendering**: Radial gradient glow, pulsing via sin(age)
-- **Trails**: Per-segment lines with alpha fade and width taper
+- **Creature rendering (v3.0 Bioluminescent)**: Semi-transparent membrane body with wobble, pulsing inner core glow (brightness = energy * luminosity), 2-5 bioluminescent spots, 2-4 trailing tendrils (bezier curves with wave motion), aggression aura (spiky membrane + red glow), reproduction heartbeat pulse rings, signal visualization (concentric expanding rings, gold/violet), action indicators (green core flash = eating, red energy flare = attacking)
+- **Food rendering**: Plant spores with 3 radiating tendrils + glow, meat as irregular organic blobs (3 overlapping circles)
+- **Trails**: Ethereal particle dots (2 per trail point with random offset, fading alpha)
 - **Selection**: Animated dashed circle, info label ("Gen X | E:Y")
+- **Minimap**: Shows creatures, food, zones, selection marker, and camera viewport rect (when zoomed)
 - **Brain visualization**: 4-column node layout, weighted connections (cyan=positive, orange=negative), activation-colored nodes, input/output labels
 
 ### Statistics (stats.js)
@@ -106,10 +110,27 @@ ui.js ← main.js
 - **Key class**: `EcoSim.UI`
 - **Speed**: Pause/1x/2x/5x/10x via buttons or keyboard (Space, 1-4)
 - **Toggles**: Trails (t), Vision ranges (v)
-- **Actions**: Add Food mode (f) — click adds cluster of 5, Spawn Creature, Reset
-- **Click interaction**: Correct coordinate mapping accounting for renderer's aspect-ratio scaling
-- **Creature inspector**: Shows ID, gen, age, energy, size, speed, food eaten, kills, children, species, efficiency, aggression
-- **Keyboard shortcuts**: Space=pause, 1-4=speed, f=food, t=trails, v=vision, Esc=deselect
+- **Actions**: Add Food mode (f) — click adds cluster of 5, Spawn Creature, Screenshot (p), Reset
+- **Camera**: Scroll=zoom toward cursor, Right-click drag=pan, WASD=move, +/-=zoom, Home=reset view, c=follow selected creature (zooms to 3x)
+- **Follow-cam**: When zoomed > 1.2x with creature selected, camera auto-follows with smooth lerp (0.08 factor)
+- **Click interaction**: Uses renderer.screenToWorld() for camera-aware coordinate mapping
+- **Fullscreen**: Double-click canvas to toggle fullscreen (minimap/overlay visible in fullscreen)
+- **Creature inspector**: Shows ID, gen, age, energy, size, speed, food eaten, kills, children, species, efficiency, aggression, signal. Includes genome viewer (color-coded gene bars) and "Show Family" toggle button for lineage visualization.
+- **Keyboard shortcuts**: Space=pause, 1-4=speed, f=food, t=trails, v=vision, g=family view, m=sound toggle, Esc=deselect, WASD=camera pan, +/-=zoom, Home=reset camera, c=follow creature, p=screenshot
+
+### Sound System (sound.js)
+- **Key object**: `EcoSim.Sound` (singleton, not a class)
+- **WebAudio API**: Uses oscillator nodes (no audio files). AudioContext created lazily on first user toggle (browser autoplay policy).
+- **Ambient drone**: Two slightly detuned sine oscillators at ~55Hz with LFO gain modulation (0.08Hz breathing). Population modulates pitch (55-85Hz) and gain.
+- **Creature sounds**: Event-driven via EcoSim.Events:
+  - `creature:eat` → high-pitched sine blip (800-1200Hz, 80ms, gain 0.04)
+  - `creature:attack` → sawtooth buzz (200-350Hz, 60ms, gain 0.06)
+  - `creature:reproduce` → two-tone chime in perfect fifth (523-783Hz, 250ms, gain 0.08)
+  - `creature:die` → descending sine tone (220Hz dropping to 88Hz, 300ms, gain 0.05)
+- **Throttling**: Each sound type limited to one play per 100ms to prevent audio spam
+- **Volume**: Master gain 0.08, individual sound gains 0.03-0.08. Very subtle.
+- **Toggle**: `Sound.toggle()` / `Sound.enable()` / `Sound.disable()`, keyboard 'm'
+- **Ambient update**: `Sound.updateAmbient(population)` called every 30 frames from main loop
 
 ### Main Loop (main.js)
 - DOMContentLoaded → create World, Renderer, Stats, UI → requestAnimationFrame loop
@@ -123,7 +144,7 @@ Key tunable values:
 WORLD: 1600x900, 50px grid cells
 CREATURES: 60 initial, 350 max, 4-14 size, 3.5 max speed
 ENERGY: 100 initial, 250 max, 0.08 drain/tick, reproduction threshold 160, reproduction cost 70
-NEURAL NET: 12→10→8→4 with tanh activations
+NEURAL NET: 17→10→8→5 with tanh activations (313 params/brain)
 FOOD: 0.6 spawn rate, 250 max, 35 energy, 30% cluster chance
 GENETICS: 15% mutation rate, 0.25 mutation strength, 5% crossover rate
 RENDERING: 8-position trails, 200 max particles
@@ -177,8 +198,24 @@ Events (all emitted by creature.js methods only — world.js just listens):
 19. **Fullscreen Mode**: Double-click canvas to toggle fullscreen. Minimap, zoom indicator, and info overlay all visible in fullscreen.
 20. **Backwards-Compatible Save Migration**: Old saves (v2, 16-input/4-output NN) automatically pad genome arrays with small random values when loaded, preserving evolved behaviors while adding new capabilities.
 
+## v2.4 Enhancements (Feb 2026)
+21. **Genome Viewer**: New visual gene bars in the creature inspector panel showing color-coded horizontal bars for 6 body genes (Size, Speed, Turn, Aggression, Efficiency, Saturation). Each bar displays the creature's value relative to its gene range. A white marker shows the population average for comparison. Gene colors: Size=#00d4ff (cyan), Speed=#7cff6b (bright green), Turn=#50e8d0 (teal), Aggression=#ff4757 (red), Efficiency=#ffa502 (orange), Saturation=#a55eea (purple). Configuration and ranges defined in ui.js with population averages calculated via `world.getPopulationGeneAverages()` which uses circular mean for hue.
+22. **Lineage Tracking**: Added `childIds` array to Creature class, populated during reproduction. Creatures now track their direct offspring. Inspector displays parent ID (if parent is alive) in the children row. "Show Family" toggle button (keyboard: g) enables visual lineage display in the renderer. When active, dashed cyan lines connect selected creature to living children with cyan highlight rings around children. Dashed orange lines connect to parent (if alive) with orange highlight ring. `world.getCreatureById(id)` provides O(n) lookup. Serialization system saves and loads childIds with backwards compatibility (defaults to empty array for old saves).
+
+## v2.5 Enhancements (Feb 2026)
+23. **Creature Sound System (WebAudio)**: New `sound.js` module providing an ambient soundscape. Quiet background drone (two detuned sine oscillators at ~55Hz with LFO modulation) that shifts pitch with population size. Event-driven creature sounds: eating blip, attack buzz, reproduction chime, death descending tone. All sounds use one-shot oscillator nodes — no audio files. Throttled to max one sound per type per 100ms. Master gain 0.08, individual gains 0.03-0.08. Toggle via 'm' key or Sound button in Controls panel. AudioContext created lazily on first user gesture (browser autoplay policy compliant).
+
+## v3.0 Visual Overhaul — Alien Bioluminescent Aesthetic (Feb 2026)
+24. **Bioluminescent Creature Redesign**: Complete replacement of creature rendering. Creatures now have semi-transparent wobbling membranes, pulsing inner core glows (brightness tied to energy and luminosity gene), 2-5 bioluminescent spots, and 2-4 trailing tendrils with organic wave motion. High-aggression creatures get spiky membrane distortion and red glow auras. Reproduction creates heartbeat pulse rings. Signals show as concentric expanding rings (gold positive, violet negative). Actions create core flashes (green=eat, red=attack).
+25. **New Luminosity Gene**: Added `luminosity` (range 0.3-1.0) to body genes. Controls creature base brightness. Mutates and evolves like other genes. Visible in genome viewer with teal color bar. New methods: `getGlowColor(alpha)` for bright inner core, `getMembraneColor(alpha)` for translucent outer membrane.
+26. **Ethereal Trail & Death Effects**: Trails are now particle dots (2 per trail point with slight random offset) instead of line segments. Death animation features bright flash → expanding dissolving membrane → 8-12 drifting luminous particles.
+27. **World Environment Overhaul**: Deep-sea radial gradient background, organic dot grid (no straight lines), organic membrane border with wobble and edge glow gradients, bioluminescent nebula zones (teal/cyan/violet with orbiting spore particles), enhanced food (plant spores with radiating tendrils, meat as irregular organic blobs), 3 types of ambient particles (120 total: spores with glow halos, drifters elongated/slow, sparks tiny/bright), 30 depth blobs for organic background noise.
+28. **Enhanced Particle Effects**: Eat=burst of green-teal luminous sparks, Attack=orange-red energy flash with lightning bolt lines, Reproduction=double-ring with inner glow fill, Death=creature-colored particles drifting outward.
+29. **CSS Bioluminescent Theme**: New accent colors (--teal, --violet), alternating panel title bar colors, panel hover glow, animated chart border gradient, speed button active pulse, header title pulse animation, subtitle shimmer gradient text, minimap teal glow border, stat value transition animation.
+
 ## Current State
-- **Status**: FUNCTIONAL v2.3 — 12 files, ~5,500 lines
+- **Status**: FUNCTIONAL v3.0 — 13 files, ~7,400 lines
+- **Latest features**: Full alien bioluminescent visual overhaul (creatures, world, UI)
 - **Known minor issues**:
   - Info overlay `textContent` replaces child spans (cosmetic — works fine as plain text)
   - Stats panel innerHTML replaces HTML-defined stat rows (functional — stats.js takes over)

@@ -122,12 +122,14 @@
         hue: c.bodyGenes.hue,
         saturation: c.bodyGenes.saturation,
         aggression: c.bodyGenes.aggression,
-        efficiency: c.bodyGenes.efficiency
+        efficiency: c.bodyGenes.efficiency,
+        luminosity: c.bodyGenes.luminosity !== undefined ? c.bodyGenes.luminosity : 0.7
       },
       brain: serializeGenome(c.brain),
       kills: c.kills,
       foodEaten: c.foodEaten,
       children: c.children,
+      childIds: c.childIds || [],
       reproductionCooldown: c.reproductionCooldown,
       signal: c.signal || 0
     };
@@ -148,6 +150,7 @@
     c.kills = data.kills;
     c.foodEaten = data.foodEaten;
     c.children = data.children;
+    c.childIds = data.childIds || [];
     c.reproductionCooldown = data.reproductionCooldown;
     c.signal = data.signal || 0;
     return c;

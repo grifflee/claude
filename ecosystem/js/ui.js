@@ -16,6 +16,7 @@
     this.stats = stats;
 
     this.addFoodMode = false;
+    this.showFamily = false;
     this.speed = 1;
     this._frameCount = 0;
 
@@ -37,6 +38,10 @@
     this.universeNameEl = document.getElementById('universe-name');
     this.universeListEl = document.getElementById('universe-list');
     this.autosaveIndicator = document.getElementById('autosave-indicator');
+
+    this.creatureExportBtn = document.getElementById('creature-export-btn');
+    this.creatureImportBtn = document.getElementById('creature-import-btn');
+    this.creatureImportInput = document.getElementById('creature-import-input');
 
     this.bindEvents();
     this.initSettings();
@@ -142,7 +147,28 @@
       });
     }
 
-    // 5d. Export/Import buttons
+    // 5d. Sound toggle button
+    var soundToggleBtn = document.getElementById('sound-toggle-btn');
+    if (soundToggleBtn) {
+      soundToggleBtn.addEventListener('click', function () {
+        if (EcoSim.Sound) {
+          var nowEnabled = EcoSim.Sound.toggle();
+          soundToggleBtn.textContent = nowEnabled ? 'Sound On (m)' : 'Sound Off (m)';
+          soundToggleBtn.classList.toggle('active', nowEnabled);
+        }
+      });
+    }
+
+    // 5e. Family button
+    var familyBtn = document.getElementById('family-btn');
+    if (familyBtn) {
+      familyBtn.addEventListener('click', function () {
+        self.showFamily = !self.showFamily;
+        familyBtn.classList.toggle('active', self.showFamily);
+      });
+    }
+
+    // 5f. Export/Import buttons
     if (this.downloadBtn) {
       this.downloadBtn.addEventListener('click', function () {
         if (EcoSim.Serialization) {
@@ -170,6 +196,25 @@
           setTimeout(function () { self.uploadBtn.textContent = 'Import'; }, 1500);
         });
         self.uploadInput.value = '';
+      });
+    }
+
+    // 5g. Creature Export/Import buttons
+    if (this.creatureExportBtn) {
+      this.creatureExportBtn.addEventListener('click', function () {
+        self.exportCreature();
+      });
+    }
+
+    if (this.creatureImportBtn && this.creatureImportInput) {
+      this.creatureImportBtn.addEventListener('click', function () {
+        self.creatureImportInput.click();
+      });
+      this.creatureImportInput.addEventListener('change', function (e) {
+        var file = e.target.files[0];
+        if (!file) return;
+        self.importCreature(file);
+        self.creatureImportInput.value = '';
       });
     }
 
@@ -354,6 +399,21 @@
         case 'p':
           self.takeScreenshot();
           break;
+        case 'g':
+          self.showFamily = !self.showFamily;
+          var fBtn = document.getElementById('family-btn');
+          if (fBtn) fBtn.classList.toggle('active', self.showFamily);
+          break;
+        case 'm':
+          if (EcoSim.Sound) {
+            var soundNowEnabled = EcoSim.Sound.toggle();
+            var sBtn = document.getElementById('sound-toggle-btn');
+            if (sBtn) {
+              sBtn.textContent = soundNowEnabled ? 'Sound On (m)' : 'Sound Off (m)';
+              sBtn.classList.toggle('active', soundNowEnabled);
+            }
+          }
+          break;
       }
     });
 
@@ -407,11 +467,34 @@
     this.updateCreatureInspector();
   };
 
+  // Gene display config: name, color, range key
+  var GENE_DISPLAY = [
+    { key: 'size',       label: 'Size',    color: '#00d4ff' },
+    { key: 'maxSpeed',   label: 'Speed',   color: '#7cff6b' },
+    { key: 'turnSpeed',  label: 'Turn',    color: '#50e8d0' },
+    { key: 'aggression', label: 'Aggro',   color: '#ff4757' },
+    { key: 'efficiency', label: 'Eff',     color: '#ffa502' },
+    { key: 'saturation', label: 'Sat',     color: '#a55eea' },
+    { key: 'luminosity', label: 'Lum',     color: '#00e5c8' }
+  ];
+
+  var GENE_RANGES = {
+    size:       { min: Config.CREATURE_MIN_SIZE, max: Config.CREATURE_MAX_SIZE },
+    maxSpeed:   { min: 1, max: Config.CREATURE_MAX_SPEED },
+    turnSpeed:  { min: 0.05, max: 0.2 },
+    saturation: { min: 40, max: 100 },
+    aggression: { min: 0, max: 1 },
+    efficiency: { min: 0.5, max: 1.5 },
+    luminosity: { min: 0.3, max: 1.0 }
+  };
+
   UI.prototype.updateCreatureInspector = function () {
     var details = this.creatureDetails;
     if (!details) return;
 
     var creature = this.world.selectedCreature;
+    var genomeViewer = document.getElementById('genome-viewer');
+    var inspectorActions = document.getElementById('inspector-actions');
 
     if (creature && creature.alive) {
       var g = creature.bodyGenes;
@@ -420,7 +503,7 @@
         'Age: ' + creature.age + ' | Energy: ' + creature.energy.toFixed(1),
         'Size: ' + creature.size.toFixed(1) + ' | Max Speed: ' + g.maxSpeed.toFixed(1),
         'Food Eaten: ' + creature.foodEaten + ' | Kills: ' + creature.kills,
-        'Children: ' + creature.children,
+        'Children: ' + creature.children + (creature.parentId ? ' | Parent: #' + creature.parentId : ''),
         'Species: ' + creature.speciesId,
         'Efficiency: ' + g.efficiency.toFixed(2) + ' | Aggression: ' + g.aggression.toFixed(2),
         'Signal: ' + (creature.signal || 0).toFixed(2)
@@ -432,11 +515,59 @@
       }
       details.innerHTML = html;
 
+      // Genome viewer — gene bars
+      if (genomeViewer) {
+        var avgs = this.world.getPopulationGeneAverages();
+        var ghtml = '';
+
+        for (var gi = 0; gi < GENE_DISPLAY.length; gi++) {
+          var gd = GENE_DISPLAY[gi];
+          var range = GENE_RANGES[gd.key];
+          var val = g[gd.key];
+          var span = range.max - range.min;
+          var pct = Math.max(0, Math.min(100, ((val - range.min) / span) * 100));
+
+          var avgPct = 50;
+          if (avgs && avgs[gd.key] !== undefined) {
+            avgPct = Math.max(0, Math.min(100, ((avgs[gd.key] - range.min) / span) * 100));
+          }
+
+          // Display value
+          var dispVal = val.toFixed(gd.key === 'aggression' ? 2 : 1);
+
+          ghtml += '<div class="gene-row">';
+          ghtml += '<span class="gene-label">' + gd.label + '</span>';
+          ghtml += '<div class="gene-bar-track">';
+          ghtml += '<div class="gene-bar-fill" style="width:' + pct.toFixed(1) + '%;background:' + gd.color + ';opacity:0.7"></div>';
+          ghtml += '<div class="gene-bar-avg" style="left:' + avgPct.toFixed(1) + '%" title="Pop avg"></div>';
+          ghtml += '</div>';
+          ghtml += '<span class="gene-value">' + dispVal + '</span>';
+          ghtml += '</div>';
+        }
+
+        genomeViewer.innerHTML = ghtml;
+      }
+
+      // Show inspector actions
+      if (inspectorActions) {
+        inspectorActions.style.display = '';
+      }
+
       if (this.creatureInspector) {
         this.creatureInspector.classList.add('visible');
       }
     } else {
       details.innerHTML = '<div class="inspector-row" style="color: rgba(255,255,255,0.4)">Click a creature to inspect</div>';
+
+      if (genomeViewer) genomeViewer.innerHTML = '';
+      if (inspectorActions) inspectorActions.style.display = 'none';
+
+      // Turn off family view when deselecting
+      if (this.showFamily) {
+        this.showFamily = false;
+        var fBtn = document.getElementById('family-btn');
+        if (fBtn) fBtn.classList.remove('active');
+      }
 
       if (this.creatureInspector) {
         this.creatureInspector.classList.remove('visible');
@@ -465,6 +596,9 @@
     if (this._frameCount % 10 === 0) {
       this.updateCreatureInspector();
     }
+
+    // Sync showFamily flag to renderer
+    this.renderer.showFamily = this.showFamily;
 
     // Follow selected creature when zoomed in
     var cam = this.renderer.camera;
@@ -619,6 +753,122 @@
     var days = Math.floor(hours / 24);
     return days + 'd ago';
   };
+
+  // ---------------------------------------------------------------
+  // Creature Export — download selected creature genome as JSON
+  // ---------------------------------------------------------------
+  UI.prototype.exportCreature = function () {
+    var creature = this.world.selectedCreature;
+    if (!creature || !creature.alive) {
+      return;
+    }
+
+    // Get brain genome and convert Float32Arrays to regular arrays (4 decimal places)
+    var genome = creature.brain.getGenome();
+    var exportData = {
+      version: 1,
+      type: 'ecosim_creature',
+      exportedAt: Date.now(),
+      creature: {
+        generation: creature.generation,
+        bodyGenes: {
+          size: creature.bodyGenes.size,
+          maxSpeed: creature.bodyGenes.maxSpeed,
+          turnSpeed: creature.bodyGenes.turnSpeed,
+          hue: creature.bodyGenes.hue,
+          saturation: creature.bodyGenes.saturation,
+          aggression: creature.bodyGenes.aggression,
+          efficiency: creature.bodyGenes.efficiency,
+          luminosity: creature.bodyGenes.luminosity !== undefined ? creature.bodyGenes.luminosity : 0.7
+        },
+        brain: {
+          w1: f32ToArr(genome.weights1),
+          b1: f32ToArr(genome.biases1),
+          w2: f32ToArr(genome.weights2),
+          b2: f32ToArr(genome.biases2),
+          w3: f32ToArr(genome.weights3),
+          b3: f32ToArr(genome.biases3)
+        },
+        stats: {
+          kills: creature.kills,
+          foodEaten: creature.foodEaten,
+          children: creature.children,
+          age: creature.age
+        }
+      }
+    };
+
+    var json = JSON.stringify(exportData, null, 2);
+    var blob = new Blob([json], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'creature_gen' + creature.generation + '_id' + creature.id + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ---------------------------------------------------------------
+  // Creature Import — load creature genome from JSON file
+  // ---------------------------------------------------------------
+  UI.prototype.importCreature = function (file) {
+    var self = this;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var data = JSON.parse(e.target.result);
+
+        // Validate file type
+        if (data.type !== 'ecosim_creature') {
+          console.warn('EcoSim: Invalid creature file — missing type field');
+          self._flashButton(self.creatureImportBtn, 'Invalid file', 'Import Creature');
+          return;
+        }
+
+        var cd = data.creature;
+
+        // Convert brain arrays back to Float32Arrays
+        var genome = {
+          weights1: new Float32Array(cd.brain.w1),
+          biases1:  new Float32Array(cd.brain.b1),
+          weights2: new Float32Array(cd.brain.w2),
+          biases2:  new Float32Array(cd.brain.b2),
+          weights3: new Float32Array(cd.brain.w3),
+          biases3:  new Float32Array(cd.brain.b3)
+        };
+
+        // Spawn at random position
+        var x = Math.random() * self.world.width;
+        var y = Math.random() * self.world.height;
+
+        var creature = new EcoSim.Creature({
+          x: x,
+          y: y,
+          bodyGenes: cd.bodyGenes,
+          genome: genome,
+          generation: cd.generation
+        });
+
+        self.world.creatures.push(creature);
+        self._flashButton(self.creatureImportBtn, 'Imported!', 'Import Creature');
+      } catch (err) {
+        console.error('EcoSim: Failed to import creature', err);
+        self._flashButton(self.creatureImportBtn, 'Error', 'Import Creature');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // ---------------------------------------------------------------
+  // Helper: convert Float32Array to plain Array with 4 decimal places
+  // ---------------------------------------------------------------
+  function f32ToArr(f32) {
+    var arr = new Array(f32.length);
+    for (var i = 0; i < f32.length; i++) {
+      arr[i] = Math.round(f32[i] * 10000) / 10000;
+    }
+    return arr;
+  }
 
   // ---------------------------------------------------------------
   // Screenshot — download canvas as PNG

@@ -44,7 +44,8 @@
     hue:        { min: 0, max: 360 },
     saturation: { min: 40, max: 100 },
     aggression: { min: 0, max: 1 },
-    efficiency: { min: 0.5, max: 1.5 }
+    efficiency: { min: 0.5, max: 1.5 },
+    luminosity: { min: 0.3, max: 1.0 }
   };
 
   // -------------------------------------------------------------------
@@ -147,6 +148,7 @@
     this.kills = 0;
     this.foodEaten = 0;
     this.children = 0;
+    this.childIds = [];
 
     // Rendering / UI state
     this.trailPositions = [];
@@ -156,6 +158,21 @@
     this.wantsToEat = false;
     this.wantsToReproduce = false;
     this.signal = 0; // broadcast signal (-1 to 1), sensed by nearby creatures
+
+    // Bioluminescent rendering properties (deterministic per creature)
+    this.tendrilCount = this.size < 7 ? 2 : (this.size < 11 ? 3 : 4);
+    this.tendrilSeeds = [];
+    this.spotSeeds = [];
+    var seedRng = this.id * 2654435761; // simple hash for determinism
+    var ii;
+    for (ii = 0; ii < 4; ii++) {
+      seedRng = (seedRng * 1103515245 + 12345) & 0x7fffffff;
+      this.tendrilSeeds.push((seedRng / 0x7fffffff) * PI * 2);
+    }
+    for (ii = 0; ii < 5; ii++) {
+      seedRng = (seedRng * 1103515245 + 12345) & 0x7fffffff;
+      this.spotSeeds.push((seedRng / 0x7fffffff) * PI * 2);
+    }
   }
 
   // -------------------------------------------------------------------
@@ -169,7 +186,8 @@
       hue:        genes.hue,
       saturation: genes.saturation,
       aggression: genes.aggression,
-      efficiency: genes.efficiency
+      efficiency: genes.efficiency,
+      luminosity: genes.luminosity !== undefined ? genes.luminosity : 0.7
     };
   }
 
@@ -375,12 +393,14 @@
     // Update parent state
     this.reproductionCooldown = Config.CREATURE_REPRODUCTION_COOLDOWN;
     this.children++;
+    this.childIds.push(offspring.id);
     this.lastAction = 'reproducing';
 
     // If partner exists, update their cooldown and children count too
     if (partner) {
       partner.reproductionCooldown = Config.CREATURE_REPRODUCTION_COOLDOWN;
       partner.children++;
+      partner.childIds.push(offspring.id);
     }
 
     Events.emit('creature:reproduce', { creature: this, offspring: offspring });
@@ -434,6 +454,41 @@
   };
 
   // -------------------------------------------------------------------
+  // getGlowColor(alpha)
+  //
+  // Bright, high-saturation version for bioluminescent inner core.
+  // -------------------------------------------------------------------
+  Creature.prototype.getGlowColor = function (alpha) {
+    var energyRatio = clamp(this.energy / Config.CREATURE_MAX_ENERGY, 0, 1);
+    var lum = this.bodyGenes.luminosity !== undefined ? this.bodyGenes.luminosity : 0.7;
+    var lightness = 50 + energyRatio * 35 + lum * 10; // 50-95%
+    var sat = min(100, this.bodyGenes.saturation + 20);
+    var a = alpha !== undefined ? alpha : 1;
+    return 'hsla(' +
+      round(this.bodyGenes.hue) + ', ' +
+      round(sat) + '%, ' +
+      round(min(95, lightness)) + '%, ' +
+      a + ')';
+  };
+
+  // -------------------------------------------------------------------
+  // getMembraneColor(alpha)
+  //
+  // Semi-transparent, desaturated version for outer membrane.
+  // -------------------------------------------------------------------
+  Creature.prototype.getMembraneColor = function (alpha) {
+    var energyRatio = clamp(this.energy / Config.CREATURE_MAX_ENERGY, 0, 1);
+    var lightness = 25 + energyRatio * 25; // 25-50%
+    var sat = max(20, this.bodyGenes.saturation - 15);
+    var a = alpha !== undefined ? alpha : 0.2;
+    return 'hsla(' +
+      round(this.bodyGenes.hue) + ', ' +
+      round(sat) + '%, ' +
+      round(lightness) + '%, ' +
+      a + ')';
+  };
+
+  // -------------------------------------------------------------------
   // distanceTo(other)
   //
   // Returns euclidean distance to another entity with x, y properties.
@@ -476,6 +531,7 @@
       kills: this.kills,
       foodEaten: this.foodEaten,
       children: this.children,
+      childIds: this.childIds,
       lastAction: this.lastAction,
       bodyGenes: copyBodyGenes(this.bodyGenes),
       brainComplexity: this.brain.getComplexity ? this.brain.getComplexity() : 0,

@@ -1,7 +1,7 @@
 # EcoSim — Enhancement Plan
 
-## Current State: v2.2 (File-Based Saves)
-The core simulation is functional with all Phase 2-5 enhancements: day/night cycle, food types, death animation, predator/prey specialization, creature memory, terrain zones, minimap, settings panel, and multi-universe file-based save system with auto-save. ~5,200 lines across 12 files.
+## Current State: v3.0 (Alien Bioluminescent Visual Overhaul)
+The core simulation is fully functional with all planned enhancements: day/night cycle, food types, death animation, predator/prey specialization, creature memory, terrain zones, minimap, settings panel, multi-universe file-based save system with auto-save, genome viewer with population averages, lineage tracking with family tree visualization, creature sound system, evolution timeline, NN weight heatmap, creature export/import, and viewport culling. ~6,800 lines across 13 files.
 
 ---
 
@@ -75,27 +75,31 @@ NN_INPUT_SIZE: 12→16. Inputs 12-15 are brain.lastOutputs from previous tick. U
 - Positive signals rendered as yellow rings, negative as purple
 - Backwards-compatible: old saves auto-pad genome arrays
 
-### 4.6 Improved Genetics / Genome Viewer
-**File**: `ui.js`, `renderer.js`
-**Description**: Show a visual genome comparison when inspecting a creature — color-coded bars for each body gene relative to population average.
-**Implementation**: Draw horizontal bars in the inspector panel below the brain canvas.
+### 4.6 Improved Genetics / Genome Viewer -- DONE
+- Visual gene bars in inspector showing 6 body genes (size, maxSpeed, turnSpeed, hue, saturation, aggression) as colored horizontal bars
+- Population average markers displayed on each bar for comparative reference
+- Efficiency is shown as a separate row below genes
+- Implemented in: `ui.js` (visual rendering), `world.js` (getPopulationGeneAverages), `style.css` (bar styling), `index.html` (gene bar HTML)
 
 ---
 
 ## Phase 5: UI & Quality of Life (Priority: MEDIUM) -- PARTIALLY COMPLETED
 
-### 5.1 Creature Lineage Tracking
-**File**: `creature.js`, `ui.js`, `world.js`
-**Description**: Track family trees. When inspecting a creature, show its parent and highlight its children in the world.
-**Implementation**:
-- Already have `parentId` and `children` count
-- Add `childIds` array to creature
-- UI: "Show children" button highlights all living descendants
-- Renderer: Draw faint lines from selected creature to its children
+### 5.1 Creature Lineage Tracking -- DONE
+- Added `childIds` array to Creature class (populated during reproduction)
+- `getCreatureById()` helper in world.js for fast family lookups
+- "Show Family" button in inspector (keyboard shortcut: g) toggles lineage visualization
+- Renderer draws connection lines: dashed cyan lines to children, dashed orange line to parent
+- Backwards-compatible serialization — old saves load without childIds field
+- Implemented in: `creature.js` (childIds array), `world.js` (getCreatureById, getPopulationGeneAverages), `renderer.js` (family line rendering), `ui.js` (Show Family button)
 
-### 5.2 Population Graph Improvements
-**File**: `stats.js`
-**Description**: Add births/deaths rate overlay, species count line, and ability to click on the chart to jump to that time (or at least show tooltip).
+### 5.2 Population Graph Improvements -- DONE
+- Birth rate (orange) and death rate (red) lines overlaid on population chart with secondary Y axis
+- Rates computed as delta between consecutive samples per interval
+- Species count overlay text on species chart (top-right corner)
+- Added tick counter to stats panel
+- Legend updated with birth/death rate values
+- Population chart height increased to 130px to fit expanded legend
 
 ### 5.3 Settings Panel -- DONE
 - Collapsible section in sidebar (click title to toggle)
@@ -135,9 +139,12 @@ Double-click canvas to toggle fullscreen. Minimap, zoom indicator, and info over
 **Description**: Move the simulation (world.update) to a Web Worker. Renderer stays on main thread. Communicate via postMessage with creature positions/states.
 **Complexity**: HIGH — requires serializing world state each frame.
 
-### 6.4 Spatial Grid for Food Rendering
-**File**: `renderer.js`
-**Description**: Only render food visible in the viewport (if we add panning/zooming).
+### 6.4 Viewport Culling -- DONE
+- `getViewBounds()` computes visible world area from camera transform with 50px margin
+- Bounds passed to drawFood, drawCreatureTrails, drawCreatures, drawParticles
+- Each draw method skips entities outside bounds with simple AABB check
+- Only active when zoomed in (camera.zoom > 1.0) — zero overhead at default zoom
+- Null-check pattern: `bounds && (x < left || ...)` short-circuits when bounds is null
 
 ---
 
@@ -155,17 +162,33 @@ Double-click canvas to toggle fullscreen. Minimap, zoom indicator, and info over
 ### 7.2 Multiple Worlds / Islands
 **Description**: Split the world into 2-4 separate islands with occasional migration between them. Creates isolated evolutionary paths that occasionally mix.
 
-### 7.3 Creature Sound
-**Description**: WebAudio API — creatures make quiet sounds based on their hue (pitch) and activity. Creates an ambient soundscape that reflects the ecosystem state.
+### 7.3 Creature Sound -- DONE
+- WebAudio API ambient soundscape: quiet drone modulated by population size
+- Event-driven sounds: eat (blip), attack (buzz), reproduce (chime), death (descending tone)
+- All sounds very quiet (master gain 0.08), throttled to prevent audio spam
+- Toggle button in UI, AudioContext created on first user gesture
+- New file: `sound.js`
 
-### 7.4 Evolution Timeline
-**Description**: Record the genome of the "most fit" creature every N ticks. Show a timeline visualization of how the dominant genome changed over time.
+### 7.4 Evolution Timeline -- DONE
+- New "Evolution" chart in sidebar tracking population-average traits over time
+- 4 trait lines: Size (cyan), Speed (green), Aggression (red), Efficiency (orange)
+- Each normalized to 0-1 within its gene range, smooth quadratic curves
+- Sampled every 10 ticks alongside population history
+- New canvas `evo-chart` (300x100) in sidebar between species chart and stats
 
-### 7.5 Neural Network Training Visualization
-**Description**: Show weight changes over generations as a heatmap — which connections are being selected for?
+### 7.5 Neural Network Weight Heatmap -- DONE
+- Weight matrix heatmap visualization below brain network diagram
+- 3 matrices drawn as colored grids (W1: 17x10, W2: 10x8, W3: 8x5)
+- Positive weights = cyan, negative = orange, intensity = magnitude
+- New canvas `heatmap-canvas` (300x60) in inspector chart-wrapper
+- Rendered every 3rd frame alongside brain viz
 
-### 7.6 Export Creature
-**Description**: Export a creature's genome as JSON. Import it into another simulation. Share creatures between users.
+### 7.6 Export Creature -- DONE
+- Export selected creature as JSON file with full genome, body genes, and stats
+- Import creature from JSON file into simulation at random position
+- Export/Import buttons in inspector actions panel
+- File format includes version, type validation, brain genome arrays
+- Backwards-compatible with genome format
 
 ---
 
@@ -190,10 +213,61 @@ When continuing development:
 ~~8. Phase 4.5 (creature communication) — signal output/input~~ DONE
 ~~9. Phase 5.5 (screenshot) + Phase 5.6 (fullscreen)~~ DONE
 ~~10. Phase 7.1 (camera pan/zoom + follow-cam)~~ DONE
-11. **NEXT**: Phase 4.6 (genome viewer) + Phase 5.1 (lineage tracking)
-12. Phase 5.2 (graph improvements)
-13. Phase 6 (performance optimization — if needed)
-14. Phase 7 (sound, evolution timeline, multi-island)
+~~11. Phase 4.6 (genome viewer) + Phase 5.1 (lineage tracking)~~ DONE
+~~12. Phase 5.2 (graph improvements)~~ DONE
+~~13. Phase 7.3 (creature sound) + Phase 7.4 (evolution timeline) + Phase 7.5 (NN heatmap) + Phase 7.6 (export creature) + Phase 6.4 (viewport culling)~~ DONE
+~~14. Phase 8 (Full Visual Overhaul — Alien Bioluminescent)~~ DONE
+15. **NEXT**: Phase 7.2 (multiple worlds/islands)
+
+---
+
+## Phase 8: Full Visual Overhaul — Alien Bioluminescent Aesthetic -- DONE
+
+### 8.1 Creature Redesign -- DONE
+- Replaced circle+eyes+nose with bioluminescent organisms
+- Outer membrane: semi-transparent elliptical body with subtle wobble
+- Inner core glow: pulsing radial gradient, brightness scales with energy
+- Bioluminescent spots: 2-5 glowing dots on membrane (deterministic per creature)
+- Trailing tendrils: 2-4 quadratic bezier curves with organic wave motion
+- Aggression aura: spiky membrane distortion + red glow for high-aggression creatures
+- Reproduction heartbeat: expanding pulse rings when above threshold
+- Signal visualization: concentric expanding rings (gold/violet)
+- Action indicators: green core flash (eating), red energy flare (attacking)
+- New `luminosity` body gene controls base brightness (0.3-1.0, evolvable)
+
+### 8.2 Trail & Death Effects -- DONE
+- Ethereal particle trails: glowing dots with slight random offset, not line segments
+- Death animation: bright flash → expanding dissolving membrane → 8-12 drifting luminous particles
+
+### 8.3 World Environment -- DONE
+- Deep-sea radial gradient background (day/night modulated)
+- Organic dot grid instead of straight lines
+- Organic membrane border with wobble and edge glow gradients
+- Bioluminescent nebula zones (teal/cyan/violet colors, orbiting spore particles)
+- Enhanced food: plant spores with radiating tendrils, meat as irregular organic blobs
+- 3 types of ambient particles: spores (glow halos), drifters (elongated), sparks (tiny/bright)
+- 30 depth blobs for organic background noise
+
+### 8.4 Particle Effects -- DONE
+- Eat: burst of green-teal luminous sparks with central glow
+- Attack: orange-red energy flash with lightning bolt lines
+- Reproduction ring: double-ring with inner glow fill
+- Death: burst of creature-colored particles with fading central glow
+
+### 8.5 CSS Overhaul -- DONE
+- New accent colors: --teal (#00e5c8) and --violet (#b464ff)
+- Panel title bars alternate cyan/teal/violet
+- Panel hover glow, chart wrapper animated border gradient
+- Speed button pulsing active glow, action button enhanced hover
+- Header title pulse animation, subtitle shimmer gradient
+- Minimap teal glow border, stat value transition
+
+### 8.6 Creature System Updates -- DONE
+- New `luminosity` body gene (range 0.3-1.0, mutates, serialized)
+- `getGlowColor(alpha)` — bright/saturated for inner core
+- `getMembraneColor(alpha)` — desaturated for outer membrane
+- `tendrilCount`, `tendrilSeeds`, `spotSeeds` per creature (deterministic from ID)
+- Backwards-compatible: old saves default luminosity to 0.7
 
 ---
 
@@ -201,13 +275,13 @@ When continuing development:
 
 ```
 EcoSim.NeuralNetwork(genome?)
-  .forward(inputs[12]) → outputs[4]
+  .forward(inputs[17]) → outputs[5]
   .mutate(rate, strength)
   .getGenome() → {weights1,biases1,...}
   static .crossover(nn1, nn2) → nn
 
 EcoSim.Creature(options?)
-  .update(inputs[12])    — brain + movement + energy
+  .update(inputs[17])    — brain + movement + energy + signal
   .eat(energy)           — gain food energy
   .attack(other)         — damage other creature
   .reproduce(partner?)   → offspring Creature

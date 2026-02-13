@@ -33,6 +33,11 @@
             var stats    = new EcoSim.Stats(popChart, speciesChart, statsPanel);
             var ui       = new EcoSim.UI(world, renderer, stats);
 
+            // 2b. Initialize sound system (event listeners only — audio starts on user toggle)
+            if (EcoSim.Sound) {
+                EcoSim.Sound.init();
+            }
+
             // 3. Expose globally for debugging
             EcoSim.world    = world;
             EcoSim.renderer = renderer;
@@ -70,10 +75,16 @@
                 // Always render (even when paused)
                 renderer.render(world);
 
-                // Brain visualization (every 3rd frame)
+                // Brain visualization + weight heatmap (every 3rd frame)
                 frameCount++;
                 if (frameCount % 3 === 0) {
                     renderer.renderBrain(world);
+                    renderer.renderWeightHeatmap(world);
+                }
+
+                // Update ambient sound (every 30 frames)
+                if (EcoSim.Sound && frameCount % 30 === 0) {
+                    EcoSim.Sound.updateAmbient(world.creatures.length);
                 }
 
                 // Stats
