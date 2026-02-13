@@ -210,6 +210,11 @@
     this.drawAmbientParticles(ctx, world.width, world.height);
     this.drawFood(ctx, world.food, bounds);
 
+    // World events — draw before creatures so they appear as environmental effects
+    if (world.activeEvents && world.activeEvents.length > 0) {
+      this.drawWorldEvents(ctx, world.activeEvents, world.tick);
+    }
+
     this.drawDyingCreatures(ctx, world.dyingCreatures);
 
     if (this.showTrails) {

@@ -96,7 +96,7 @@
       this.addFoodBtn.addEventListener('click', function () {
         self.addFoodMode = !self.addFoodMode;
         self.addFoodBtn.classList.toggle('active', self.addFoodMode);
-        canvas.style.cursor = self.addFoodMode ? 'crosshair' : 'default';
+        canvas.style.cursor = self.addFoodMode ? 'crosshair' : 'grab';
       });
     }
 
@@ -229,6 +229,12 @@
     // 6. Canvas click
     if (canvas) {
       canvas.addEventListener('click', function (event) {
+        // Suppress click if it was a drag gesture
+        if (isLeftDragging) {
+          isLeftDragging = false;
+          return;
+        }
+
         var pos = canvasToWorld(event);
         var x = pos.x;
         var y = pos.y;
@@ -246,9 +252,9 @@
         self.updateCreatureInspector();
       });
 
-      // 7. Canvas mousemove
+      // 7. Canvas mousemove — hover cursor
       canvas.addEventListener('mousemove', function (event) {
-        if (self.addFoodMode) return;
+        if (self.addFoodMode || isLeftDragging || isPanning) return;
 
         var pos = canvasToWorld(event);
         var x = pos.x;
@@ -268,7 +274,7 @@
           }
         }
 
-        canvas.style.cursor = hovering ? 'pointer' : 'default';
+        canvas.style.cursor = hovering ? 'pointer' : 'grab';
       });
     }
 
@@ -283,12 +289,20 @@
         renderer.zoomAt(sx, sy, factor);
       }, { passive: false });
 
-      // 8b. Right-click drag to pan camera
+      // 8b. Drag to pan camera (left-click or right-click)
       var isPanning = false;
       var panStartX = 0;
       var panStartY = 0;
       var panStartCamX = 0;
       var panStartCamY = 0;
+
+      var leftMouseDown = false;
+      var isLeftDragging = false;
+      var leftDragStartX = 0;
+      var leftDragStartY = 0;
+      var leftDragCamStartX = 0;
+      var leftDragCamStartY = 0;
+      var DRAG_THRESHOLD = 5;
 
       canvas.addEventListener('mousedown', function (event) {
         if (event.button === 2) { // right-click
@@ -299,21 +313,47 @@
           panStartCamY = renderer.camera.y;
           canvas.style.cursor = 'grabbing';
           event.preventDefault();
+        } else if (event.button === 0) { // left-click
+          leftMouseDown = true;
+          isLeftDragging = false;
+          leftDragStartX = event.clientX;
+          leftDragStartY = event.clientY;
+          leftDragCamStartX = renderer.camera.x;
+          leftDragCamStartY = renderer.camera.y;
         }
       });
 
       document.addEventListener('mousemove', function (event) {
-        if (!isPanning) return;
-        var dx = event.clientX - panStartX;
-        var dy = event.clientY - panStartY;
-        renderer.camera.x = panStartCamX - dx / renderer._scale;
-        renderer.camera.y = panStartCamY - dy / renderer._scale;
+        if (isPanning) {
+          var dx = event.clientX - panStartX;
+          var dy = event.clientY - panStartY;
+          renderer.camera.x = panStartCamX - dx / renderer._scale;
+          renderer.camera.y = panStartCamY - dy / renderer._scale;
+        }
+        if (leftMouseDown) {
+          var ldx = event.clientX - leftDragStartX;
+          var ldy = event.clientY - leftDragStartY;
+          if (!isLeftDragging && (ldx * ldx + ldy * ldy) > DRAG_THRESHOLD * DRAG_THRESHOLD) {
+            isLeftDragging = true;
+            canvas.style.cursor = 'grabbing';
+          }
+          if (isLeftDragging) {
+            renderer.camera.x = leftDragCamStartX - ldx / renderer._scale;
+            renderer.camera.y = leftDragCamStartY - ldy / renderer._scale;
+          }
+        }
       });
 
       document.addEventListener('mouseup', function (event) {
         if (event.button === 2 && isPanning) {
           isPanning = false;
-          canvas.style.cursor = self.addFoodMode ? 'crosshair' : 'default';
+          canvas.style.cursor = self.addFoodMode ? 'crosshair' : 'grab';
+        }
+        if (event.button === 0) {
+          leftMouseDown = false;
+          if (isLeftDragging) {
+            canvas.style.cursor = self.addFoodMode ? 'crosshair' : 'grab';
+          }
         }
       });
 
@@ -461,7 +501,7 @@
     if (this.addFoodMode) {
       this.addFoodMode = false;
       if (this.addFoodBtn) this.addFoodBtn.classList.remove('active');
-      if (this.canvas) this.canvas.style.cursor = 'default';
+      if (this.canvas) this.canvas.style.cursor = 'grab';
     }
 
     this.updateCreatureInspector();

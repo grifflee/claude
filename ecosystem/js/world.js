@@ -117,6 +117,9 @@
     this.zones = [];
     this._initZones();
 
+    // World events system
+    this._initEvents();
+
     // Bind event listeners
     this._setupEventListeners();
   }
@@ -137,6 +140,15 @@
         vy: (Math.random() - 0.5) * 0.02
       });
     }
+  };
+
+  // ---------------------------------------------------------------
+  // _initEvents() -- set up world events scheduling
+  // ---------------------------------------------------------------
+  World.prototype._initEvents = function () {
+    this.nextEventTick = 800 + Math.floor(Math.random() * 1500);
+    this.activeEvents = [];
+    this.mutationStormTicks = 0;
   };
 
   // ---------------------------------------------------------------
@@ -196,6 +208,7 @@
     this.maxGeneration = 0;
     this.selectedCreature = null;
     this._initZones();
+    this._initEvents();
 
     // Spawn initial creatures at random positions
     for (i = 0; i < INITIAL_CREATURE_COUNT; i++) {
@@ -246,6 +259,15 @@
     var fi;
     for (fi = 0; fi < this.food.length; fi++) {
       this.food[fi].age++;
+    }
+
+    // Apply mutation storm boost (temporarily modify Config, restored after creature loop)
+    var savedMutRate, savedMutStr;
+    if (this.mutationStormTicks > 0) {
+      savedMutRate = Config.MUTATION_RATE;
+      savedMutStr = Config.MUTATION_STRENGTH;
+      Config.MUTATION_RATE = Math.min(0.8, savedMutRate * Config.EVENT_MUTATION_STORM_MULTIPLIER);
+      Config.MUTATION_STRENGTH = Math.min(0.6, savedMutStr * 1.5);
     }
 
     // Process creatures (iterate backwards for safe removal)
@@ -303,6 +325,16 @@
       creatures.splice(0, excess);
     }
 
+    // Restore mutation rate after creature processing
+    if (savedMutRate !== undefined) {
+      Config.MUTATION_RATE = savedMutRate;
+      Config.MUTATION_STRENGTH = savedMutStr;
+    }
+
+    // World events — check, trigger, and apply ongoing effects
+    this._checkWorldEvents();
+    this._applyActiveEvents();
+
     // Drift fertile zones slowly
     for (i = 0; i < this.zones.length; i++) {
       var z = this.zones[i];
@@ -326,9 +358,9 @@
     // Update particles
     this._updateParticles();
 
-    // Enforce minimum population
-    if (creatures.length < 15) {
-      for (i = 0; i < 25; i++) {
+    // Enforce minimum population (scaled for 4800x2700 world)
+    if (creatures.length < 30) {
+      for (i = 0; i < 50; i++) {
         this._spawnRandomCreature();
       }
     }
@@ -983,6 +1015,142 @@
       efficiency: sums.efficiency * inv,
       luminosity: sums.luminosity * inv
     };
+  };
+
+  // ---------------------------------------------------------------
+  // _checkWorldEvents() -- schedule and trigger random world events
+  // ---------------------------------------------------------------
+  World.prototype._checkWorldEvents = function () {
+    // Tick down active events
+    var i;
+    for (i = this.activeEvents.length - 1; i >= 0; i--) {
+      this.activeEvents[i].ticksLeft--;
+      if (this.activeEvents[i].ticksLeft <= 0) {
+        this.activeEvents.splice(i, 1);
+      }
+    }
+
+    // Tick down mutation storm
+    if (this.mutationStormTicks > 0) {
+      this.mutationStormTicks--;
+    }
+
+    // Check if it's time for a new event
+    if (this.tick < this.nextEventTick) return;
+
+    // Schedule next event
+    this.nextEventTick = this.tick + Config.EVENT_MIN_INTERVAL +
+      Math.floor(Math.random() * (Config.EVENT_MAX_INTERVAL - Config.EVENT_MIN_INTERVAL));
+
+    // Pick random event type
+    var types = ['bloom', 'plague', 'meteor', 'mutationStorm'];
+    var type = types[Math.floor(Math.random() * types.length)];
+    this._triggerWorldEvent(type);
+  };
+
+  // ---------------------------------------------------------------
+  // _triggerWorldEvent(type) -- execute a world event
+  // ---------------------------------------------------------------
+  World.prototype._triggerWorldEvent = function (type) {
+    var x = 200 + Math.random() * (this.width - 400);
+    var y = 200 + Math.random() * (this.height - 400);
+    var i, a, d, fx, fy;
+
+    switch (type) {
+      case 'bloom':
+        var bloomRadius = Config.EVENT_BLOOM_RADIUS;
+        var bloomCount = Config.EVENT_BLOOM_FOOD_COUNT;
+        for (i = 0; i < bloomCount; i++) {
+          a = Math.random() * Math.PI * 2;
+          d = Math.random() * bloomRadius;
+          fx = clamp(x + Math.cos(a) * d, 20, this.width - 20);
+          fy = clamp(y + Math.sin(a) * d, 20, this.height - 20);
+          this.food.push(createFood(fx, fy));
+        }
+        this.activeEvents.push({
+          type: 'bloom', x: x, y: y, radius: bloomRadius,
+          ticksLeft: 120, maxTicks: 120
+        });
+        Events.emit('world:event', { type: 'bloom', label: 'Food Bloom' });
+        break;
+
+      case 'plague':
+        var plagueRadius = Config.EVENT_PLAGUE_RADIUS;
+        this.activeEvents.push({
+          type: 'plague', x: x, y: y, radius: plagueRadius,
+          ticksLeft: Config.EVENT_PLAGUE_DURATION, maxTicks: Config.EVENT_PLAGUE_DURATION
+        });
+        Events.emit('world:event', { type: 'plague', label: 'Plague' });
+        break;
+
+      case 'meteor':
+        var meteorRadius = Config.EVENT_METEOR_KILL_RADIUS;
+        var meteorRadiusSq = meteorRadius * meteorRadius;
+        // Kill creatures in blast radius
+        for (i = this.creatures.length - 1; i >= 0; i--) {
+          var c = this.creatures[i];
+          if (!c.alive) continue;
+          var dx = c.x - x, dy = c.y - y;
+          if (dx * dx + dy * dy < meteorRadiusSq) {
+            c.die();
+          }
+        }
+        // Create a fertile crater zone at impact
+        this.zones.push({
+          x: x, y: y,
+          radius: Config.EVENT_METEOR_ZONE_RADIUS,
+          spawnMultiplier: 3 + Math.random() * 2,
+          vx: 0, vy: 0
+        });
+        this.activeEvents.push({
+          type: 'meteor', x: x, y: y, radius: meteorRadius,
+          ticksLeft: 90, maxTicks: 90
+        });
+        Events.emit('world:event', { type: 'meteor', label: 'Meteor Impact' });
+        break;
+
+      case 'mutationStorm':
+        this.mutationStormTicks = Config.EVENT_MUTATION_STORM_DURATION;
+        this.activeEvents.push({
+          type: 'mutationStorm', x: this.width / 2, y: this.height / 2,
+          radius: Math.max(this.width, this.height),
+          ticksLeft: Config.EVENT_MUTATION_STORM_DURATION,
+          maxTicks: Config.EVENT_MUTATION_STORM_DURATION
+        });
+        Events.emit('world:event', { type: 'mutationStorm', label: 'Mutation Storm' });
+        break;
+    }
+  };
+
+  // ---------------------------------------------------------------
+  // _applyActiveEvents() -- apply ongoing effects of active events
+  // ---------------------------------------------------------------
+  World.prototype._applyActiveEvents = function () {
+    var events = this.activeEvents;
+    var creatures = this.creatures;
+    var i, j, evt, c, dx, dy, dSq;
+
+    for (i = 0; i < events.length; i++) {
+      evt = events[i];
+      if (evt.type === 'plague') {
+        var rSq = evt.radius * evt.radius;
+        for (j = 0; j < creatures.length; j++) {
+          c = creatures[j];
+          if (!c.alive) continue;
+          dx = c.x - evt.x;
+          dy = c.y - evt.y;
+          dSq = dx * dx + dy * dy;
+          if (dSq < rSq) {
+            // High-efficiency creatures resist plague better
+            var resistance = c.bodyGenes.efficiency; // 0.5-1.5
+            var damage = Config.EVENT_PLAGUE_DAMAGE * (1.5 - resistance);
+            if (damage > 0) {
+              c.energy -= damage;
+            }
+          }
+        }
+      }
+    }
   };
 
   // ---------------------------------------------------------------

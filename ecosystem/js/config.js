@@ -29,7 +29,7 @@ EcoSim.Config = {
   CREATURE_REPRODUCTION_COOLDOWN: 100,
   CREATURE_ATTACK_ENERGY_GAIN: 50,
   CREATURE_ATTACK_RANGE: 20,
-  CREATURE_VISION_RANGE: 120,
+  CREATURE_VISION_RANGE: 180,
   CREATURE_EAT_RANGE: 10,
 
   // ---- Neural Network ----
@@ -56,8 +56,8 @@ EcoSim.Config = {
   NN_OUTPUT_SIZE: 5,
 
   // ---- Food ----
-  FOOD_SPAWN_RATE: 1.5,       // avg food spawned per tick
-  FOOD_MAX_COUNT: 600,
+  FOOD_SPAWN_RATE: 6.0,       // avg food spawned per tick (scaled for 4800x2700 world)
+  FOOD_MAX_COUNT: 2500,
   FOOD_ENERGY: 35,
   FOOD_SIZE: 3,
   FOOD_CLUSTER_CHANCE: 0.3,    // chance food spawns near existing food
@@ -88,6 +88,19 @@ EcoSim.Config = {
   // ---- Food Types ----
   MEAT_ENERGY: 60,              // energy from meat (dropped by dead creatures)
   MEAT_SPAWN_CHANCE: 0.7,       // chance dead creature drops meat
+
+  // ---- World Events ----
+  EVENT_MIN_INTERVAL: 2000,     // min ticks between random events
+  EVENT_MAX_INTERVAL: 4000,     // max ticks between random events
+  EVENT_BLOOM_RADIUS: 350,      // food bloom spawn area
+  EVENT_BLOOM_FOOD_COUNT: 100,  // food items spawned in bloom
+  EVENT_PLAGUE_RADIUS: 500,     // plague effect area
+  EVENT_PLAGUE_DAMAGE: 0.4,     // energy drain per tick (before resistance)
+  EVENT_PLAGUE_DURATION: 300,   // ticks plague lasts
+  EVENT_METEOR_KILL_RADIUS: 250,  // instant kill zone
+  EVENT_METEOR_ZONE_RADIUS: 300,  // fertile crater zone size
+  EVENT_MUTATION_STORM_DURATION: 600, // ticks of boosted mutation
+  EVENT_MUTATION_STORM_MULTIPLIER: 4, // mutation rate multiplier
 
   // ---- Simulation ----
   TARGET_FPS: 60,
